@@ -12,6 +12,11 @@ var SocketListener = null;
 var rdpPort = 6100;
 var isShuttingDown = false;
 var devToolsLoader = null;
+// Why the last openListener() returned false - quoted by the startup log and
+// the health check so the reason is not lost (see openListener()).
+var lastOpenFailure = "";
+// One-shot guard for the "DevTools has no connection counter" warning.
+var counterWarned = false;
 
 // Log using dump() and Zotero.debug() - console is NOT available in bootstrap context
 function log(msg) {
@@ -22,6 +27,113 @@ function log(msg) {
       Zotero.debug(fullMsg);
     }
   } catch (e) {}
+}
+
+// Persistent lifecycle breadcrumbs.
+//
+// log() above goes to dump() -- lost unless Zotero was started from a console
+// -- and to Zotero.debug(), which is a no-op unless the user has debug output
+// enabled. So a bridge that fails at boot leaves NO durable trace: all the
+// user sees is "Cannot connect to Zotero RDP" from their MCP client, with no
+// way to tell whether Zotero was down, the plugin was disabled, or something
+// else held the port.
+//
+// One line per lifecycle TRANSITION in <profile>/mcp-rdp-events.log:
+// startup, listener open / down / recovered, shutdown. Never one line per
+// health-check tick: a bridge stuck behind a foreign port holder would
+// otherwise write two lines every 10s (about 1 MB a day), in exactly the
+// scenario the file exists for. The file survives restarts and is readable
+// without Zotero running.
+function crumb(msg) {
+  try {
+    var f = PathUtils.join(PathUtils.profileDir, "mcp-rdp-events.log");
+    // IOUtils.writeUTF8 does not throw on a failed write - it REJECTS - so the
+    // try/catch around it never sees one; the .catch() does.
+    IOUtils.writeUTF8(f, new Date().toISOString() + " " + msg + "\n",
+      { mode: "appendOrCreate" })
+      .catch(function (e) { log("crumb failed: " + e); });
+  } catch (e) {
+    try { log("crumb failed: " + e); } catch (e2) {}
+  }
+}
+
+// Listener state as the breadcrumbs know it. A crumb is written only when the
+// state FLIPS, with two dampers so that no failure mode can grow the file
+// without bound:
+//
+//  - An outage is crumbed when a reopen attempt FAILS, not when the probe
+//    first misses. Further failed attempts are counted, not logged, and the
+//    count and duration go into the recovery line.
+//  - A down period that ends on the very first reopen is a FLAP, not an
+//    outage. Without this, a listener that dies and reopens on every 10s tick
+//    writes a DOWN and a RECOVERED per tick: 2,658 lines for the kind of
+//    episode seen in June, which is the unbounded growth transition logging
+//    was meant to remove. A run of flaps costs one FLAPPING line and one
+//    STEADY line, however long it lasts.
+var listenerUp = false;
+var downSince = 0;       // when the current down period started (0 while up)
+var downChecks = 0;      // failed reopen attempts in this down period
+var downLogged = false;  // has this down period been crumbed?
+var flapCount = 0;       // short down/up cycles since the last STEADY
+var flapSince = 0;       // when the current run of flaps started
+var healthyChecks = 0;   // consecutive healthy probes since the last flap
+
+// `confirmed` means a reopen attempt has actually failed. An unconfirmed down
+// (the probe missed, the reopen has not been tried yet) stays silent until it
+// either fails once - and is crumbed then - or turns out to be a flap.
+function markListenerDown(why, confirmed) {
+  if (!listenerUp && downSince) {         // already down
+    if (confirmed && !downLogged) {
+      downLogged = true;
+      crumb("listener DOWN on port " + rdpPort + " - " + why);
+    }
+    return;
+  }
+  listenerUp = false;
+  downSince = Date.now();
+  downChecks = 0;
+  downLogged = false;
+  if (confirmed) {
+    downLogged = true;
+    crumb("listener DOWN on port " + rdpPort + " - " + why);
+  }
+}
+
+function markListenerUp() {
+  if (listenerUp) return;
+  if (downLogged) {
+    var secs = Math.round((Date.now() - downSince) / 1000);
+    crumb("listener RECOVERED on port " + rdpPort + " after " + downChecks
+      + " failed check" + (downChecks === 1 ? "" : "s") + ", " + secs + "s down");
+  } else if (downSince) {
+    // Down and back on the first reopen: a flap. One line for the whole run.
+    flapCount++;
+    if (flapCount === 1) {
+      flapSince = Date.now();
+      crumb("listener FLAPPING on port " + rdpPort + " - down and back within one"
+        + " check; further flaps are counted, not logged");
+    }
+  } else {
+    crumb("listener OPEN on port " + rdpPort);
+  }
+  listenerUp = true;
+  downSince = 0;
+  downChecks = 0;
+  downLogged = false;
+  healthyChecks = 0;
+}
+
+// Called on every healthy probe. Silent unless a run of flaps is open, in
+// which case it closes it once the listener has held for a minute.
+function markListenerHealthy() {
+  if (!flapCount) return;
+  if (++healthyChecks < 6) return;        // ~1 minute at the 10s interval
+  var secs = Math.round((Date.now() - flapSince) / 1000);
+  crumb("listener STEADY on port " + rdpPort + " after " + flapCount + " flap"
+    + (flapCount === 1 ? "" : "s") + " in " + secs + "s");
+  flapCount = 0;
+  flapSince = 0;
+  healthyChecks = 0;
 }
 
 // Initialize or reinitialize the DevTools stack
@@ -44,8 +156,17 @@ function initDevToolsStack() {
     }
     DevToolsServer.registerAllActors();
     DevToolsServer.allowChromeProcess = true;
+    // CRITICAL: without keepAlive, the DevToolsServer destroys itself - and
+    // its listeners - whenever the LAST client connection closes. With a
+    // non-destructive health check this surfaces as the listener dying
+    // moments after every probe disconnect (when no MCP client holds a
+    // long-lived connection); the original 2s reopen loop was accidentally
+    // masking it by perpetually recreating the listener. Verified by
+    // holding an external connection open: the kill cycle stopped for
+    // exactly as long as the connection was held.
+    DevToolsServer.keepAlive = true;
 
-    log("DevTools stack initialized");
+    log("DevTools stack initialized (keepAlive=true)");
     return true;
   } catch (e) {
     log("Error initializing DevTools stack: " + e);
@@ -73,9 +194,57 @@ async function openListener() {
 
     rdpListener = new SocketListener(DevToolsServer, { portOrPath: rdpPort });
     await rdpListener.open();
-    log("Listener opened on port " + rdpPort);
+
+    // open() resolving is NOT proof that this process serves the port (#19).
+    // Mozilla server sockets bind with SO_REUSEADDR, and on Windows that lets
+    // a second bind succeed on a port another process already listens on:
+    // open() resolves, nothing is served by us, and every later claim
+    // ("SUCCESS", "reopened by health check") is false while the health check
+    // reopens every 10s forever. macOS rejects the second bind with
+    // EADDRINUSE, so there open() throws and the catch below reports the
+    // failure correctly. Verifying here makes both platforms behave the same,
+    // and catches any other way a listener can come up without serving.
+    //
+    // Two checks, both needed:
+    //  1. probeConnect(): something on the port answers with the RDP intro
+    //     packet (the same client-side probe the health check uses).
+    //  2. DevToolsServer._nextConnID advanced: it was OUR server that accepted
+    //     the probe. _onConnection() increments that counter for every
+    //     accepted socket, so an intro sent by another Zotero holding the
+    //     port leaves it untouched. The probe alone cannot tell the two
+    //     apart - both speak RDP.
+    var connsBefore = DevToolsServer._nextConnID;
+    var haveCounter = typeof connsBefore === "number";
+    if (!haveCounter && !counterWarned) {
+      // _nextConnID is DevTools internals (set to 0 by init(), incremented by
+      // _onConnection for every accepted socket). If a future Firefox ESR
+      // renames or removes it the check degrades to the probe alone, which
+      // cannot tell our own listener from another Zotero holding the port -
+      // exactly the case the counter exists to catch. Say so, once, in both
+      // logs, so the degradation is visible instead of silent.
+      counterWarned = true;
+      var why = "DevToolsServer._nextConnID is " + typeof connsBefore
+        + ", not a number: cannot verify that an answering port is served by"
+        + " THIS process. Falling back to the connect-probe alone.";
+      log("WARNING: " + why);
+      crumb("WARNING: " + why);
+    }
+    var answered = await probeConnect();
+    var accepted = !haveCounter || DevToolsServer._nextConnID > connsBefore;
+    if (!answered || !accepted) {
+      lastOpenFailure = !answered
+        ? "port " + rdpPort + " does not answer (held by another process?)"
+        : "port " + rdpPort + " is served by another process";
+      log("Listener open on port " + rdpPort + " NOT verified: " + lastOpenFailure);
+      try { rdpListener.close(); } catch (e) {}
+      rdpListener = null;
+      return false;
+    }
+    lastOpenFailure = "";
+    log("Listener opened on port " + rdpPort + " (verified)");
     return true;
   } catch (e) {
+    lastOpenFailure = "open() failed: " + e;
     log("Error opening listener: " + e);
     rdpListener = null;
     // Reset stack on error so it will be recreated next time
@@ -86,9 +255,90 @@ async function openListener() {
   }
 }
 
-// Simple periodic reopener - tries to open listener every few seconds
-// If listener is already running, the open() will fail harmlessly (port in use)
+// Periodic NON-DESTRUCTIVE health check.
+//
+// The previous implementation called openListener() every 2 seconds, and
+// openListener() unconditionally CLOSES the live listener before reopening -
+// the "fails harmlessly (port in use)" assumption never held because the
+// close frees the port first. Measured effect: the port refused most
+// incoming connections (35/40 in a 10s probe run) and established
+// connections died within a single cycle, so any RDP request in flight lost
+// its reply (MCP clients saw "undefined" results / transient disconnects).
+//
+// Instead, probe the port as a CLIENT: if a TCP connect to 127.0.0.1:port
+// succeeds, the listener is healthy and is left strictly alone; only when
+// the connect fails (refused / timed out) is the listener actually reopened.
+// (A bind-probe would be unreliable: Mozilla server sockets set SO_REUSEADDR,
+// and on Windows that lets a second bind steal a live port.)
 var healthCheckInterval = null;
+
+function probeConnect() {
+  return new Promise(function (resolve) {
+    var done = false;
+    var transport = null;
+    var finish = function (alive) {
+      if (done) return;
+      done = true;
+      try { if (transport) transport.close(Components.results.NS_OK); } catch (e) {}
+      resolve(alive);
+    };
+    try {
+      var sts = Components.classes["@mozilla.org/network/socket-transport-service;1"]
+        .getService(Components.interfaces.nsISocketTransportService);
+      transport = sts.createTransport([], "127.0.0.1", rdpPort, null, null);
+      var timer = setTimeout(function () { finish(false); }, 1500);
+      // IMPORTANT: wait for the server's RDP intro packet and only close
+      // AFTER reading it. Closing at TCP-connect time aborts the connection
+      // mid-handshake - the DevTools server's intro write then hits a dying
+      // socket and the LISTENER itself can self-close, i.e. the probe kills
+      // the very listener it is checking (observed as a 10-20s flap cycle).
+      transport.openOutputStream(0, 0, 0);   // kicks off the connect
+      var input = transport.openInputStream(0, 0, 0);
+      input.asyncWait({
+        onInputStreamReady: function (s) {
+          clearTimeout(timer);
+          var alive = false;
+          try {
+            var n = s.available();           // throws if closed/refused
+            if (n > 0) {
+              alive = true;
+              // Drain the intro bytes so the server's write completes.
+              var sis = Components.classes["@mozilla.org/scriptableinputstream;1"]
+                .createInstance(Components.interfaces.nsIScriptableInputStream);
+              sis.init(s);
+              sis.read(n);
+            }
+          } catch (e) { alive = false; }
+          finish(alive);
+        }
+      }, 0, 0, Services.tm.currentThread);
+    } catch (e) {
+      finish(false);
+    }
+  });
+}
+
+async function checkListener() {
+  if (isShuttingDown) return;
+  if (rdpListener) {
+    var alive = await probeConnect();
+    if (alive || isShuttingDown) {
+      if (alive) markListenerHealthy();
+      return;                              // healthy - do NOT touch the listener
+    }
+    log("Health check: port " + rdpPort + " not answering - reopening listener");
+    markListenerDown("stopped answering", false);
+  }
+  var ok = await openListener();
+  if (ok) {
+    log("Listener (re)opened by health check");
+    markListenerUp();
+  } else {
+    log("Health check: reopen failed - " + lastOpenFailure);
+    downChecks++;
+    markListenerDown("stopped answering, reopen failed: " + lastOpenFailure, true);
+  }
+}
 
 function startHealthCheck() {
   if (healthCheckInterval) return;
@@ -98,18 +348,10 @@ function startHealthCheck() {
       stopHealthCheck();
       return;
     }
+    checkListener().catch(function () {});
+  }, 10000);  // Probe every 10 seconds (read-only when healthy)
 
-    // Simply try to reopen - openListener handles errors gracefully
-    openListener().then(function(success) {
-      if (success) {
-        log("Listener reopened by health check");
-      }
-    }).catch(function() {
-      // Silently ignore - might be already listening
-    });
-  }, 2000);  // Try every 2 seconds
-
-  log("Health check started");
+  log("Health check started (non-destructive connect-probe, 10s)");
 }
 
 function stopHealthCheck() {
@@ -126,7 +368,15 @@ function install(data, reason) {
 
 async function startup({ id, version, resourceURI, rootURI }, reason) {
   log("startup() called, reason=" + reason);
+  crumb("startup v" + version + " reason=" + reason);
   isShuttingDown = false;
+  listenerUp = false;
+  downSince = 0;
+  downChecks = 0;
+  downLogged = false;
+  flapCount = 0;
+  flapSince = 0;
+  healthyChecks = 0;
 
   try {
     await Zotero.initializationPromise;
@@ -145,13 +395,48 @@ async function startup({ id, version, resourceURI, rootURI }, reason) {
     }
   } catch (e) {}
 
-  // Get port (default 6100)
+  // Get port (default 6100).
+  //
+  // The documented name is `extensions.mcp-rdp.port`, which needs the global
+  // flag -- without it Zotero.Prefs resolves the name under `extensions.zotero.`.
+  // Releases up to 1.0.4 read it without the flag, so any profile that managed
+  // to configure a custom port has it stored under the prefixed name. Read
+  // both, documented first, so those instances keep their port instead of
+  // silently reverting to 6100. The fallback can go after a deprecation period.
   try {
-    var prefPort = Zotero.Prefs.get("extensions.mcp-rdp.port");
-    if (prefPort) rdpPort = prefPort;
+    var prefPort = Zotero.Prefs.get("extensions.mcp-rdp.port", true);
+    if (!prefPort) {
+      try { prefPort = Zotero.Prefs.get("extensions.mcp-rdp.port"); } catch (e2) {}
+    }
+    // Validate before use. Prefs.get returns whatever type the pref was created
+    // with, and Zotero's Config Editor pre-selects Boolean - a pref created
+    // without switching to Number reads back as `true`. SocketListener treats a
+    // non-numeric portOrPath as a PIPE PATH and opens successfully, so the
+    // bridge would log success, serve nothing over TCP, and have the health
+    // check reopen it every 10s forever. Keep the default instead and say so.
+    if (prefPort) {
+      var parsedPort = parseInt(prefPort, 10);
+      if (parsedPort > 0 && parsedPort < 65536) {
+        rdpPort = parsedPort;
+      } else {
+        log("Ignoring invalid extensions.mcp-rdp.port value (" + prefPort +
+            ") - staying on port " + rdpPort);
+      }
+    }
   } catch (e) {}
 
   log("Starting RDP server on port " + rdpPort);
+
+  // Ensure DevTools preferences are set (required for RDP to work)
+  try {
+    var start = "devtools.debugger.";
+    Services.prefs.setBoolPref(start + "remote-enabled", true);
+    Services.prefs.setBoolPref(start + "prompt-connection", false);
+    Services.prefs.setBoolPref("devtools.chrome.enabled", true);
+    log("DevTools preferences configured");
+  } catch (e) {
+    log("Warning: Could not set DevTools preferences: " + e);
+  }
 
   try {
     // Initialize DevTools stack
@@ -163,23 +448,36 @@ async function startup({ id, version, resourceURI, rootURI }, reason) {
     // Open the listener
     var success = await openListener();
     if (success) {
-      rdpStarted = true;
-      startHealthCheck();
       log("SUCCESS - Server listening on port " + rdpPort);
+      markListenerUp();
     } else {
-      log("Failed to open listener");
+      log("Failed to open listener: " + lastOpenFailure);
+      markListenerDown("failed to open at startup: " + lastOpenFailure, true);
     }
+    // Start the health check UNCONDITIONALLY. The non-destructive check
+    // reopens the listener whenever the port stops answering, so a failed
+    // open at startup (e.g. the port was briefly busy by another process or
+    // a not-yet-released previous instance) self-heals on a later tick
+    // instead of leaving the bridge permanently dead until a manual plugin
+    // reload or Zotero restart. Previously this ran only inside the success
+    // branch, so a failed boot-open could never recover.
+    rdpStarted = true;
+    startHealthCheck();
   } catch (e) {
     log("ERROR: " + e);
+    crumb("startup ERROR: " + e);
     if (e.stack) log("Stack: " + e.stack);
     try {
       Zotero.logError(e);
     } catch (e2) {}
+    // Even after an unexpected startup error, keep trying to come up.
+    try { rdpStarted = true; startHealthCheck(); } catch (e3) {}
   }
 }
 
 function shutdown({ id, version, resourceURI, rootURI }, reason) {
   log("shutdown() called, reason=" + reason);
+  crumb("shutdown v" + version + " reason=" + reason);
   isShuttingDown = true;  // Prevent auto-reopen
   stopHealthCheck();
 
@@ -203,3 +501,9 @@ function shutdown({ id, version, resourceURI, rootURI }, reason) {
 function uninstall(data, reason) {
   log("uninstall() called");
 }
+
+// No-op window hooks. Zotero 7+ calls these on every plugin and logs a
+// "Plugin ... is missing bootstrap method" warning per window when absent.
+// The RDP server is window-independent, so there is nothing to do here.
+function onMainWindowLoad() {}
+function onMainWindowUnload() {}

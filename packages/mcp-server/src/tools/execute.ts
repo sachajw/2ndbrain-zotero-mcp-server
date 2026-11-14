@@ -107,6 +107,7 @@ export const executeJsTool: Tool = {
     "Execute JavaScript code in Zotero's privileged chrome context. " +
     "Has full access to Zotero APIs (Zotero.*, ZoteroPane, etc.). " +
     "Use for testing code snippets, inspecting state, or performing actions. " +
+    "Prefer a dedicated tool when one fits the question (zotero_db_query for library data, zotero_read_logs/zotero_read_errors for output, zotero_inspect_object for API discovery); reach for raw JS only when none does. " +
     "Code with top-level 'return' statements is auto-wrapped in an IIFE. " +
     "Tip: For complex objects, use JSON.stringify(obj) to get full data. " +
     "IMPORTANT: Before calling unknown APIs, use zotero_inspect_object to discover available methods - don't guess API names.",
@@ -847,10 +848,14 @@ export async function handleOpenPreferences(
 
   const client = await getRdpClient();
 
-  // Build the code to open preferences
+  // Open the pane. We only need the side effect, so the eval returns nothing:
+  // that avoids a top-level `return` (no IIFE needed) and keeps paneId out of a
+  // generated string literal — it is only ever a JSON.stringify'd argument, so a
+  // paneId containing a quote can't break the snippet. The success message is
+  // built here in TypeScript instead of inside the eval.
   const code = paneId
-    ? `Zotero.Utilities.Internal.openPreferences(${JSON.stringify(paneId)}); return 'Preferences opened to: ${paneId}';`
-    : `Zotero.Utilities.Internal.openPreferences(); return 'Preferences window opened';`;
+    ? `Zotero.Utilities.Internal.openPreferences(${JSON.stringify(paneId)})`
+    : `Zotero.Utilities.Internal.openPreferences()`;
 
   const response = await client.evaluateJS(code);
 
@@ -864,7 +869,9 @@ export async function handleOpenPreferences(
     ];
   }
 
-  const result = await client.gripToValueAsync(response.result);
+  const result = paneId
+    ? `Preferences opened to: ${paneId}`
+    : "Preferences window opened";
 
   // Also list available panes for reference
   const panesCode = `

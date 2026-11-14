@@ -15,13 +15,14 @@
 
 ---
 
-A **Model Context Protocol (MCP) server** that enables AI assistants like Claude, Cursor, and Windsurf to build, test, and debug [Zotero](https://www.zotero.org) 7/8 plugins. Screenshots, DOM state, debug logs, and JavaScript execution give the AI rich context to understand what's happening—and tools to help you fix it.
+A **Model Context Protocol (MCP) server** that enables AI assistants like Claude, Cursor, and Windsurf to build, test, and debug [Zotero](https://www.zotero.org) 7, 8, 9, and 10 plugins. Screenshots, DOM state, debug logs, and JavaScript execution give the AI rich context to understand what's happening—and tools to help you fix it.
 
 ## ✨ Features
 
 | Category | Capabilities |
 |----------|-------------|
 | 🎯 **UI Inspection** | Screenshots, DOM tree, element finding, computed styles |
+| 🖱️ **UI Interaction** | Click elements and type text (shadow-DOM aware) |
 | 💻 **JS Execution** | Run code in Zotero context, inspect APIs, test snippets |
 | 🔧 **Build Tools** | Scaffold integration for build, serve, hot reload |
 | 📋 **Logs & Errors** | Stream debug output, error console, watch for issues |
@@ -35,7 +36,7 @@ A **Model Context Protocol (MCP) server** that enables AI assistants like Claude
 ### Prerequisites
 
 - **Node.js** 20+ and npm
-- **Zotero 7+** — Works on all Zotero 7 and 8 builds (release, beta, dev)
+- **Zotero 7+** — Works on all Zotero 7, 8, 9, and 10 builds (release, beta, dev)
 - For plugin development: [zotero-plugin-scaffold](https://github.com/windingwind/zotero-plugin-scaffold)
 
 ### 1. Install MCP Server
@@ -90,7 +91,7 @@ Add to your MCP client config:
   "mcpServers": {
     "zotero-dev": {
       "command": "npx",
-      "args": ["-y", "@introfini/mcp-server-zotero-dev"],
+      "args": ["-y", "@introfini/mcp-server-zotero-dev@1.1.1"],
       "env": {
         "ZOTERO_RDP_PORT": "6100"
       }
@@ -99,6 +100,8 @@ Add to your MCP client config:
 }
 ```
 </details>
+
+> **Version & updates**: pin an exact version as shown above. A bare `npx <pkg>` (no version) keeps running whatever `npx` cached and won't pick up new releases, so always include a version and `-y` (without `-y`, `npx` hangs waiting for an install prompt). Bump the pinned version to upgrade, or use `@latest` to always fetch the newest at launch (auto-updates, but a bad release would run automatically and it adds a registry check on every start). Note that `install-mcp` may write a config without `-y` or a version, so the manual configuration above is the most robust path.
 
 **Restart your AI assistant** after adding the configuration.
 
@@ -123,7 +126,7 @@ That's it! No special launch flags, no configuration. 🎉
 
 ---
 
-## 🧰 Available Tools (26 total)
+## 🧰 Available Tools (28 total)
 
 <details>
 <summary><strong>UI Inspection</strong> — Screenshots, DOM, styles</summary>
@@ -137,6 +140,18 @@ That's it! No special launch flags, no configuration. 🎉
 | `zotero_list_windows` | List all open Zotero windows |
 
 > **Screenshot Targets**: Main window, preferences, PDF reader, dialogs, or any element by selector. Use `highlightSelector` to add a red border before capture.
+
+</details>
+
+<details>
+<summary><strong>UI Interaction</strong> — Click and type in the Zotero UI</summary>
+
+| Tool | Description |
+|------|-------------|
+| `zotero_click_element` | Click an element by CSS selector (toolbar/menu button, preference control, list row). Pierces shadow DOM; `index` picks among multiple matches; `mouseEvents` synthesizes a full mouse sequence. |
+| `zotero_send_keys` | Type text into an input/textarea/contenteditable (focuses it first, fires input/change). Optional `clear` and `pressEnter`. |
+
+> Resolution tries light DOM first, then pierces open shadow roots (Zotero's XUL custom elements keep internals in shadow DOM). **Limitation**: cannot dismiss a *blocking* native modal dialog (`Services.prompt.confirmEx`) — its nested modal loop blocks the eval thread these tools run on.
 
 </details>
 
@@ -264,6 +279,80 @@ That's it! No special launch flags, no configuration. 🎉
 
 ---
 
+## 🔌 Changing the RDP Port
+
+The bridge listens on port `6100` by default. You only need to change it if you run **two Zotero instances at the same time** (a normal profile and a development one, say), or if another process already holds 6100.
+
+The port lives on **both sides of the bridge**, and both have to agree on it.
+
+**1. Zotero side** — set the plugin preference:
+
+1. **Settings → Advanced → Config Editor**, and accept the warning
+2. Search for `extensions.mcp-rdp.port`
+3. If it doesn't exist, create it: select **Number**, name it `extensions.mcp-rdp.port`, and enter your port
+4. **Restart Zotero** — the listener only opens at startup
+
+> **Watch the type.** The Config Editor pre-selects **Boolean**. Creating the preference without switching to **Number** stores `true` instead of a port, and Zotero then opens the bridge on a local pipe rather than a TCP port — the debug log reports success while no MCP client can connect.
+
+**2. Client side** — set `ZOTERO_RDP_PORT` to the same value in your MCP client config:
+
+```json
+{
+  "mcpServers": {
+    "zotero-dev": {
+      "command": "npx",
+      "args": ["-y", "@introfini/mcp-server-zotero-dev@1.1.2"],
+      "env": {
+        "ZOTERO_RDP_PORT": "6101"
+      }
+    }
+  }
+}
+```
+
+> **Change both or neither.** Moving only one side disconnects the bridge: Zotero listens on one port while the client keeps dialing the other.
+
+### Actually running two instances
+
+Launching Zotero a second time hands you the window you already have — like Firefox, it forwards to the running instance instead of starting another. A second instance needs its own profile *and* `-no-remote`:
+
+```bash
+# macOS; adjust the binary path on Windows/Linux
+MOZ_NO_REMOTE=1 "/Applications/Zotero.app/Contents/MacOS/zotero" -P <profile-name> -no-remote
+```
+
+Give that profile its own `extensions.mcp-rdp.port` and the two bridges stay out of each other's way. Verified with 9.0.6 on 6100 and 10.0-beta.22 on 6101 at the same time.
+
+> **Requires MCP Bridge plugin 1.0.5 or later.** In 1.0.4 and earlier, `extensions.mcp-rdp.port` was read under the wrong preference branch and silently ignored, so the bridge stayed on 6100 no matter what you set. If you configured a custom port against an older build, it is stored as `extensions.zotero.extensions.mcp-rdp.port` — that name still works, but prefer the one above.
+
+### Disabling the bridge
+
+Set `extensions.mcp-rdp.enabled` to `false` (**Boolean**) in the Config Editor and restart Zotero. The plugin stays installed but opens no listener, and no MCP client can reach Zotero until you set it back to `true`.
+
+### Checking what the bridge did
+
+The plugin appends one line per lifecycle **transition** to `mcp-rdp-events.log` in your Zotero **profile** directory: startup, listener open, listener down, listener recovered, listener flapping, shutdown. It survives restarts and is readable without Zotero running, which makes it the first place to look when an MCP client reports `Cannot connect to Zotero RDP`:
+
+```
+2026-09-17T07:52:36.201Z startup v1.0.5 reason=1
+2026-09-17T07:52:37.914Z listener DOWN on port 6177 - failed to open at startup: port 6177 does not answer (held by another process?)
+2026-09-17T07:53:46.552Z listener RECOVERED on port 6177 after 6 failed checks, 69s down
+2026-09-17T08:01:12.083Z shutdown v1.0.5 reason=2
+```
+
+What to read from it:
+
+- **`listener DOWN … failed to open at startup`** — something else holds the port: another Zotero instance, a previous one that has not released it, or a process that answers on the port without speaking RDP. The reason after the colon says which of the last two it is.
+- **`listener DOWN … stopped answering`** — the listener was up and then died. The health check reopens it; the next line tells you when that worked and how long the gap was.
+- **`listener RECOVERED … after N failed checks`** — the bridge came back on its own. A large N means the port was held for a long time; nothing is logged per attempt, so the file stays short no matter how long the outage.
+- **`listener FLAPPING`**, later closed by **`listener STEADY … after N flaps`** — the listener keeps dying and coming straight back on the first reopen. That is a different fault from an outage: the port is yours, something is tearing the listener down. The whole run costs these two lines however long it goes on, so N is the number to report if you open an issue.
+- **A `startup` with no `shutdown` before it** — Zotero was killed or crashed rather than exiting cleanly. Usually the answer to "the bridge stopped working" is simply that Zotero is not running.
+- **No new lines at all** — the plugin never started: disabled by preference, or not installed in the profile you are actually running.
+
+`log()` output goes to `dump()` (lost unless Zotero was started from a console) and `Zotero.debug()` (a no-op unless debug output is enabled), so this file is the only durable record of a boot-time failure. A healthy session adds three lines (startup, open, shutdown); an outage adds two more, and a run of flaps two more, whatever their length. No failure mode writes per tick.
+
+---
+
 ## 📸 Screenshot Examples
 
 ```typescript
@@ -302,14 +391,14 @@ npm install
 npm run build
 
 # Build individual packages
-npm run build -w mcp-server
-npm run build -w zotero-plugin-mcp-rdp
+npm run build:server
+npm run build:plugin
 
 # Run tests
 npm test
 
 # Development mode (watch)
-npm run dev -w mcp-server
+npm run dev
 ```
 
 <details>
@@ -328,7 +417,7 @@ mcp-server-zotero-dev/
 │   │
 │   └── zotero-plugin-mcp-rdp/    # Tiny Zotero plugin (.xpi)
 │       ├── src/
-│       │   └── index.ts          # Starts RDP server
+│       │   └── bootstrap.js      # Starts RDP server (shipped verbatim)
 │       ├── addon/
 │       │   └── manifest.json
 │       └── package.json
@@ -345,6 +434,7 @@ mcp-server-zotero-dev/
 
 - **[Architecture & Technical Learnings](ARCHITECTURE.md)** — Deep dive into RDP protocol, actor hierarchy, and common pitfalls
 - **[Zotero Plugin Development](https://www.zotero.org/support/dev/client_coding/plugin_development)** — Official docs
+- **[Zotero 10 for Developers](https://www.zotero.org/support/dev/zotero_10_for_developers)** — Migration guide for the latest major
 - **[Zotero 7 for Developers](https://www.zotero.org/support/dev/zotero_7_for_developers)** — Migration guide
 - **[zotero-plugin-scaffold](https://github.com/windingwind/zotero-plugin-scaffold)** — Build tooling
 - **[zotero-plugin-template](https://github.com/windingwind/zotero-plugin-template)** — Starter template
@@ -355,12 +445,14 @@ mcp-server-zotero-dev/
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please:
+Contributions are welcome. See **[CONTRIBUTING.md](CONTRIBUTING.md)** for setup, test conventions and the codebase-specific rules worth knowing before you start.
+
+The short version:
 
 1. Follow existing code patterns
-2. Add tests for new features
+2. Add tests for new features, and skip rather than fail when Zotero is not running
 3. Update documentation
-4. Ensure `npm test` and `npm run lint` pass
+4. There is no CI, so run `npm run build`, `npm run typecheck`, `npm run lint` and `npm test` yourself, and say in the PR which Zotero version you verified against
 
 ---
 

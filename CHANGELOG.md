@@ -2,6 +2,84 @@
 
 All notable changes to MCP Server Zotero Dev will be documented in this file.
 
+## [1.1.4] - 2026-09-20
+
+### Fixed
+- **`zotero_ping` printed a success banner when Zotero was unreachable** ([#24](https://github.com/introfini/mcp-server-zotero-dev/issues/24), [#31](https://github.com/introfini/mcp-server-zotero-dev/pull/31), thanks to @mjthoraval). `getTarget` on the parent `ProcessDescriptor` hands back the main window's global only while a Zotero window exists. Running windowless (on macOS the app stays in the Dock after the last window is closed) the target degrades to an empty `about:blank` frame where `typeof Zotero` is `"undefined"` and every tool fails with `Zotero is not defined`. The handler never looked at `.exception` on its four evals, so in exactly that state it reported `✓ Connected to [object Object] [object Object]` and told the user it was ready.
+
+  The tool moved to `src/tools/ping.ts` and now sends one JSON round-tripped probe instead of four raw reads, with three outcomes handled: an exception throws so the existing `✗ Cannot connect` branch prints it, an unreachable Zotero gets a dedicated `✗ Bridge reachable on port N, but Zotero is not` naming the state and how to leave it, and a reachable one builds the same banner as before from parsed JSON rather than from resolved grips. Reachability depends on an open window, not on the Zotero process, so a readiness check that only tests whether the port accepts a TCP connection cannot tell the two apart.
+
+### Added
+- **First tests in the tree.** `packages/mcp-server/tests/ping.test.mts` covers the three reply shapes a real Zotero produces, the `{type:"null"}` grip that `gripToValue` hands through as an object, and a live round trip that skips (with a warning) when no Zotero answers. `npm test` exits 0 instead of `No test files found`.
+
+### Docs
+- ARCHITECTURE.md: new **A Zotero window must be open** section next to the actor-hierarchy walkthrough, explaining why the RDP handshake succeeding says nothing about `Zotero` resolving.
+
+## [Plugin 1.0.6] - 2026-09-20
+
+### Fixed
+- **The bridge no longer claims a port it does not serve** ([#19](https://github.com/introfini/mcp-server-zotero-dev/issues/19), [#30](https://github.com/introfini/mcp-server-zotero-dev/pull/30), thanks to @mjthoraval). `openListener()` returned `true` as soon as `SocketListener.open()` resolved, which proves nothing: Mozilla server sockets bind with `SO_REUSEADDR`, so on Windows a second bind succeeds on a port another process already listens on. The plugin logged `SUCCESS - Server listening`, served nothing, and the health check reopened every 10s forever, each time as false as the first. macOS rejects the second bind with `EADDRINUSE`, so the existing `catch` already reported it there; the verification makes both platforms behave the same and covers every other way a listener can come up without serving.
+
+  `openListener()` now settles its own result with two checks: the same client-side probe the health check uses (something on the port answers with the RDP intro), and `DevToolsServer`'s connection counter advancing across that probe, which proves it was *our* server that accepted it. An intro sent by another Zotero holding the port leaves the counter untouched, and the probe alone cannot tell the two apart. On failure the listener is closed and the reason (`does not answer` / `is served by another process` / `open() failed`) is kept and quoted by the startup log and the health check.
+- **A missing DevTools connection counter is now reported instead of silently weakening the check.** `_nextConnID` is DevTools internals; if a future Firefox ESR renames it the verification degrades to the probe alone, which cannot detect a second Zotero on the port. The plugin now says so once, in both logs. One to re-check for Zotero 11 ([#27](https://github.com/introfini/mcp-server-zotero-dev/issues/27)).
+
+### Added
+- **Persistent lifecycle breadcrumbs** in `<profile>/mcp-rdp-events.log` ([#18](https://github.com/introfini/mcp-server-zotero-dev/pull/18), thanks to @mjthoraval). `log()` writes to `dump()`, lost unless Zotero was started from a console, and to `Zotero.debug()`, a no-op unless debug output is enabled, so a bridge that failed at boot left no durable trace at all: the MCP client said `Cannot connect to Zotero RDP` and nothing said whether Zotero was down, the plugin disabled, or the port held by someone else.
+
+  One line per lifecycle **transition**: `startup`, `listener OPEN`, `listener DOWN` with the reason, `listener RECOVERED` with the failed-check count and the seconds down, `shutdown`. Nothing is written per health-check tick, and no failure mode grows the file without bound: an outage costs two lines however long it lasts, and a listener that keeps dying and coming straight back costs one `FLAPPING` line and one `STEADY` line for the whole run, with the flaps counted in between. A healthy session writes three lines. A `startup` with no `shutdown` before it means Zotero was killed rather than exiting cleanly.
+
+### Docs
+- README: new **Checking what the bridge did** section under *Changing the RDP Port*, with a sample log and what each line means.
+
+## [1.1.3] - 2026-08-17
+
+### Fixed
+- **`zotero_db_query` failed on every query returning rows** ([#20](https://github.com/introfini/mcp-server-zotero-dev/issues/20), [#21](https://github.com/introfini/mcp-server-zotero-dev/pull/21), thanks to @hainingpan), with `result.columns.join is not a function` — broken since 1.0.0 on every Zotero version. Two independent defects, either one fatal:
+  - Column names were derived with `Object.keys(rows[0])`, but `Zotero.DB.queryAsync` wraps rows in a Proxy with only `get`/`has` traps (no `ownKeys`), so key enumeration returned the underlying `mozIStorageRow`'s XPCOM members instead of column names. Rows are now read via `queryAsync`'s `onRow` callback (raw `mozIStorageRow`, positional `getResultByIndex()`), with column names parsed from the SELECT list host-side and a `col1..colN` fallback when the list isn't statically parseable (e.g. `SELECT *`).
+  - The eval returned a raw nested object, which RDP grip resolution flattens to placeholder strings (`columns` arrived as `"[Array]"`). Payloads are now `JSON.stringify`d inside the eval and parsed host-side, matching the convention already used by the other tool files.
+- **`zotero_db_schema`** shared the raw-object serialization defect and got the same JSON-encoding fix on both branches (single-table and table listing).
+
+## [Plugin 1.0.5] - 2026-07-31
+
+### Fixed
+- **`extensions.mcp-rdp.port` is now actually read** ([#17](https://github.com/introfini/mcp-server-zotero-dev/pull/17), thanks to @mjthoraval). The 1.0.4 fix changed `src/bootstrap.ts` and `src/index.ts`, but `scripts/build.mjs` ships `src/bootstrap.js`, so the released XPI never got it: the preference was read without the global flag, resolved under `extensions.zotero.`, and the documented name did nothing. Both names are read now, documented first, falling back to the legacy `extensions.zotero.`-prefixed one so profiles with a custom port keep it.
+- **Invalid port values no longer break the bridge.** Zotero's Config Editor pre-selects **Boolean**, so a preference created without switching to **Number** stored `true`. `SocketListener` treats a non-numeric `portOrPath` as a pipe path and opens successfully, leaving the bridge logging success while serving nothing over TCP and reopening every 10s. The value is now parsed and range-checked: anything invalid keeps port 6100 and is logged.
+
+### Removed
+- **Dead `src/bootstrap.ts` and `src/index.ts`.** Nothing ever compiled them — the plugin has no `tsconfig`, the root `typecheck`/`lint` run with `--if-present`, and there is no CI — and they called three DevTools APIs that do not exist (`devtools-server.mjs`, `DevToolsServer.openListener`, `DevToolsServer.closeAllListeners`). Keeping a second, unbuildable copy of the bootstrap is what shipped the broken 1.0.4 fix. `main` now points at `src/bootstrap.js`, the file the build actually ships.
+
+### Docs
+- README: new **Changing the RDP Port** section covering the Zotero-side preference, the matching `ZOTERO_RDP_PORT` on the client, the fact that both sides must agree, and the Config Editor type trap. Also documents `extensions.mcp-rdp.enabled`, which had never been mentioned anywhere.
+
+## [1.1.1] - 2026-06-22
+
+### Fixed
+- `serverInfo.version` in the MCP handshake now reads from `package.json` instead of a hard-coded `0.1.0`, so clients report the real running version.
+
+### Docs
+- README: pin an exact version in the `npx` config, and document the `npx` cache behavior, the `@latest` vs pin tradeoff, and the `-y` flag (without it `npx` hangs). Flag that `install-mcp` may write a config without `-y` or a version.
+
+## [1.1.0] - 2026-06-22
+
+### Added
+- **UI interaction tools** (`src/tools/interact.ts`) — the server could *inspect* the Zotero UI (`zotero_screenshot` / `zotero_inspect_element` / `zotero_get_dom_tree`) but not *act* on it. Two tools close that gap:
+  - `zotero_click_element` — click an element by CSS selector (`el.click()`, or a synthesized `mousedown`/`mouseup`/`click` sequence via `mouseEvents`). Supports `windowId` and an `index` for selectors that match several elements.
+  - `zotero_send_keys` — type text into an input/textarea/contenteditable, firing `input`/`change` so listeners react; optional `clear` and `pressEnter`.
+- Both reuse the existing RDP `evaluateJS` channel (no new actor) and **pierce open shadow roots** — Zotero's XUL custom elements (e.g. `search-textbox`) keep their internals in shadow DOM, which a document-level `querySelector` can't reach.
+
+### Known limitation
+- These tools cannot dismiss a **blocking** native modal dialog (`Services.prompt.confirmEx`): its nested modal event loop blocks the main thread that `evaluateJS` runs on. Non-modal windows and in-window elements work normally.
+
+## [Plugin 1.0.1] - 2026-04-11
+
+### Fixed
+- **Zotero 9 compatibility** — bumped `strict_max_version` from `8.*` to `9.*` in the plugin manifest so the MCP Bridge XPI loads on Zotero 9.0. Without this fix, Zotero 9 refuses to activate the plugin, leaving the RDP port (6100) closed and disconnecting MCP clients (Claude Code, Cursor, Windsurf) from Zotero.
+
+### Technical
+- `packages/zotero-plugin-mcp-rdp/package.json` version bumped to 1.0.1 (build script auto-syncs this into the XPI manifest).
+- `update.json` regenerated with the v1.0.1 download URL and an explicit `strict_max_version: "9.*"` in the applications block.
+- The MCP server half (`@introfini/mcp-server-zotero-dev`) is unchanged — this release only ships a new Zotero plugin XPI.
+
 ## [1.0.0] - 2025-01-24
 
 ### Initial Release 🎉

@@ -412,8 +412,13 @@ export class RDPClient extends EventEmitter {
       });
 
       // RDP packet format: <length>:<json>
+      // The length prefix is the UTF-8 BYTE length, not the JS character
+      // count: json.length undercounts any non-ASCII payload (e.g. emoji or
+      // accented text inside code strings), which corrupts the stream and
+      // wedges the connection. The receive path (processBuffer) already does
+      // byte-based framing for the same reason.
       const json = JSON.stringify(message);
-      const packet = `${json.length}:${json}`;
+      const packet = `${Buffer.byteLength(json, "utf8")}:${json}`;
 
       this.socket!.write(packet, (err) => {
         if (err) {
@@ -597,13 +602,28 @@ export class RDPClient extends EventEmitter {
         return this.evaluateJS(code, retryCount + 1);
       }
 
-      // Connection errors: full reconnect needed
-      if (isConnectionError && retryCount < maxRetries) {
-        // Exponential backoff based on consecutive failures
-        const backoffMs = Math.min(1000 * Math.pow(2, this.consecutiveFailures - 1), 5000);
-        await this.delay(backoffMs);
-        await this.reconnect();
-        return this.evaluateJS(code, retryCount + 1);
+      // Connection errors: reconnect so the NEXT call works, but DO NOT
+      // resend this code. A connection drop loses the REPLY, not necessarily
+      // the request - the eval may have already executed in Zotero, and a
+      // blind resend runs its side effects twice (e.g. double plugin
+      // installs, duplicated mutations). Surface an honest error and let the
+      // caller verify before retrying.
+      if (isConnectionError) {
+        let reconnected = false;
+        try {
+          await this.reconnect();
+          reconnected = true;
+        } catch {
+          // Reconnect failure is secondary; report the original drop.
+        }
+        throw new Error(
+          "Connection lost while waiting for the evaluateJS result; " +
+            "the code may or may not have executed in Zotero. " +
+            "Verify its effect before re-running " +
+            (reconnected
+              ? "(the connection has been re-established)."
+              : "(reconnection also failed; Zotero may be unreachable).")
+        );
       }
 
       throw error;
@@ -910,6 +930,15 @@ export class RDPClient extends EventEmitter {
     const wasConnected = this.state.connected;
     this.state.connected = false;
     this.socket = null;
+
+    // Fail pending requests immediately - their replies can never arrive on
+    // a closed socket. They previously sat out the full request timeout
+    // (30s by default) before erroring.
+    this.pendingRequests.forEach((req) => {
+      clearTimeout(req.timeout);
+      req.reject(new Error("Connection closed before a reply arrived"));
+    });
+    this.pendingRequests.clear();
 
     if (wasConnected) {
       this.emit("disconnected");

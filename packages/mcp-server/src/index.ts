@@ -14,6 +14,8 @@
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
@@ -42,6 +44,7 @@ import {
   handleOpenPreferences,
 } from "./tools/execute.js";
 import { screenshotTool, handleScreenshot } from "./tools/screenshot.js";
+import { pingTool, handlePing } from "./tools/ping.js";
 import {
   inspectElementTool,
   getDomTreeTool,
@@ -52,6 +55,12 @@ import {
   handleGetStyles,
   handleListWindows,
 } from "./tools/inspect.js";
+import {
+  clickElementTool,
+  sendKeysTool,
+  handleClickElement,
+  handleSendKeys,
+} from "./tools/interact.js";
 import {
   readLogsTool,
   readErrorsTool,
@@ -90,11 +99,19 @@ import {
 } from "./tools/database.js";
 import { allPrompts, getPromptHandler } from "./prompts/index.js";
 
+// Read the version from package.json so the MCP handshake (serverInfo.version)
+// reports the real published version instead of a hard-coded constant.
+// dist/index.js is CommonJS, so __dirname points at dist/; package.json sits one
+// level up and is always included in the published tarball.
+const { version: serverVersion } = JSON.parse(
+  readFileSync(join(__dirname, "../package.json"), "utf8")
+) as { version: string };
+
 // Server instance
 const server = new Server(
   {
     name: "mcp-server-zotero-dev",
-    version: "0.1.0",
+    version: serverVersion,
   },
   {
     capabilities: {
@@ -134,71 +151,6 @@ export function getConfig(): Config {
 }
 
 // Ping tool definition
-const pingTool: Tool = {
-  name: "zotero_ping",
-  description:
-    "Test connection to Zotero and get version info. " +
-    "Use this to verify that Zotero is running and the MCP Bridge for Zotero plugin is active.",
-  inputSchema: {
-    type: "object",
-    properties: {},
-    required: [],
-  },
-};
-
-/**
- * Handle the ping tool
- */
-async function handlePing(): Promise<TextContent[]> {
-  try {
-    const client = await getRdpClient();
-
-    // Execute JS to get Zotero version
-    const versionResult = await client.evaluateJS("Zotero.version");
-    const version = await client.gripToValueAsync(versionResult.result);
-
-    // Get app name
-    const appResult = await client.evaluateJS("Zotero.appName");
-    const appName = await client.gripToValueAsync(appResult.result);
-
-    // Get platform
-    const platformResult = await client.evaluateJS("Zotero.platformMajorVersion");
-    const platformVersion = await client.gripToValueAsync(platformResult.result);
-
-    // Get data directory
-    const dataDirResult = await client.evaluateJS("Zotero.DataDirectory.dir");
-    const dataDir = await client.gripToValueAsync(dataDirResult.result);
-
-    return [
-      {
-        type: "text",
-        text:
-          `✓ Connected to ${appName} ${version}\n` +
-          `  Platform: Firefox ${platformVersion}\n` +
-          `  Data directory: ${dataDir}\n` +
-          `  RDP port: ${config.rdp.port}\n\n` +
-          `Ready to help with Zotero plugin development!`,
-      },
-    ];
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return [
-      {
-        type: "text",
-        text:
-          `✗ Cannot connect to Zotero\n\n` +
-          `Error: ${message}\n\n` +
-          `Troubleshooting:\n` +
-          `1. Make sure Zotero is running\n` +
-          `2. Install the MCP Bridge for Zotero plugin in Zotero:\n` +
-          `   Tools → Add-ons → ⚙️ → Install from file\n` +
-          `3. Restart Zotero after installing the plugin\n` +
-          `4. Check that port ${config.rdp.port} is not blocked`,
-      },
-    ];
-  }
-}
-
 // Collect all tools
 const allTools: Tool[] = [
   pingTool,
@@ -213,6 +165,8 @@ const allTools: Tool[] = [
   getDomTreeTool,
   getStylesTool,
   listWindowsTool,
+  clickElementTool,
+  sendKeysTool,
   readLogsTool,
   readErrorsTool,
   clearLogsTool,
@@ -255,7 +209,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     switch (name) {
       // Core tools
       case "zotero_ping":
-        content = await handlePing();
+        content = await handlePing(config.rdp.port);
         break;
       case "zotero_execute_js":
         content = await handleExecuteJs(args as Record<string, unknown>);
@@ -293,6 +247,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         break;
       case "zotero_list_windows":
         content = await handleListWindows();
+        break;
+
+      // Interaction tools
+      case "zotero_click_element":
+        content = await handleClickElement(args as Record<string, unknown>);
+        break;
+      case "zotero_send_keys":
+        content = await handleSendKeys(args as Record<string, unknown>);
         break;
 
       // Logging tools
