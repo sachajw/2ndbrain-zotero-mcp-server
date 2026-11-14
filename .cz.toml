@@ -1,9 +1,13 @@
+# Commit rules for this repo. Copied from ~/.config/commitizen/cz.toml on 2026-11-14 (the
+# commit types and patterns); keep the two in step by hand. Used by the commit-msg hook
+# (lefthook.yml) and by GitHub (.github/workflows/commitizen.yml).
 [tool.commitizen]
 name = "cz_customize"
 tag_format = "$version"
 version_scheme = "semver"
-version = "0.0.1"
-update_changelog_on_bump = true
+version = "1.0.4"  # @introfini/mcp-server-zotero-dev (packages/mcp-server)
+version_files = ["packages/mcp-server/package.json:^  \"version\""]
+update_changelog_on_bump = false  # CHANGELOG.md is hand-written upstream; with true, bump also fails until a version tag exists
 major_version_zero = true
 
 [tool.commitizen.customize]

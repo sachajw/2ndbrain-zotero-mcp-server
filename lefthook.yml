@@ -1,3 +1,15 @@
-extends:
-- /Users/tvl/.config/lefthook/templates/commitizen.yml
-- /Users/tvl/.config/lefthook/templates/gitleaks.yml
+# Git hooks for this repo, run by lefthook (version pinned in mise.toml).
+# Jobs are kept here rather than extended from ~/.config/lefthook/templates so the hooks
+# work on any machine and in CI. Source templates: commitizen.yml and gitleaks.yml there;
+# copy changes across by hand.
+pre-commit:
+  jobs:
+    - name: gitleaks
+      # GITLEAKS_CONFIG (optional) points at a gitleaks config; unset = gitleaks' bundled rules.
+      run: gitleaks protect --staged --no-banner ${GITLEAKS_CONFIG:+--config "$GITLEAKS_CONFIG"}
+
+commit-msg:
+  jobs:
+    - name: cz-check
+      # Rules in .cz.toml (emoji + LABEL). The same check runs on GitHub: .github/workflows/commitizen.yml
+      run: cz check --commit-msg-file {1}
