@@ -1,0 +1,3 @@
+extends:
+- /Users/tvl/.config/lefthook/templates/commitizen.yml
+- /Users/tvl/.config/lefthook/templates/gitleaks.yml
