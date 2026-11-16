@@ -18,53 +18,42 @@ AI Assistant (Claude, Cursor, Windsurf, etc.)
 
 - **Node.js** >= 20
 - **Zotero 7+** (release, beta, or dev build)
-- **MCP Bridge for Zotero** plugin installed in Zotero — build it with `npm run build:plugin` from the repo root
+- **MCP Bridge for Zotero** plugin installed in Zotero: [download the latest XPI](https://github.com/sachajw/2ndbrain-zotero-mcp-server/releases/download/plugin-v1.0.7/zotero-mcp-bridge-1.0.7.xpi)
 
 ### Installing the MCP Bridge plugin
 
-1. Run `npm run build:plugin` from the repo root; it writes `packages/zotero-plugin-mcp-rdp/build/zotero-mcp-bridge.xpi`
-2. In Zotero: **Tools > Add-ons > gear icon > Install Add-on From File...**
-3. Select the built `.xpi` file
+1. Download `zotero-mcp-bridge-*.xpi` from the [plugin release](https://github.com/sachajw/2ndbrain-zotero-mcp-server/releases/tag/plugin-v1.0.7)
+2. In Zotero: **Tools > Plugins > gear icon > Install Plugin From File...**
+3. Select the downloaded `.xpi` file
 4. Restart Zotero
 
 The plugin automatically starts a DevTools server on port 6100 when Zotero launches.
 
 ## Setup
 
-This package isn't published to npm yet, so the `npx` and `npm install -g` commands below won't resolve. Until it is, run `npm ci && npm run build` from the repo root and use `node /path/to/packages/mcp-server/dist/index.js` as the command.
+This package isn't on npm. Each [release](https://github.com/sachajw/2ndbrain-zotero-mcp-server/releases) attaches an `npm pack` tarball, and `npx` runs it from the release URL.
 
-### Claude Desktop
+### Claude Code
 
-Add to your `claude_desktop_config.json`:
+```bash
+claude mcp add zotero-dev -e ZOTERO_RDP_PORT=6100 -- npx -y https://github.com/sachajw/2ndbrain-zotero-mcp-server/releases/download/v1.1.5/sachajw-mcp-server-zotero-dev-1.1.5.tgz
+```
+
+### Claude Desktop / Cursor / Windsurf / other MCP clients
 
 ```json
 {
   "mcpServers": {
     "zotero-dev": {
       "command": "npx",
-      "args": ["-y", "@sachajw/mcp-server-zotero-dev"]
+      "args": ["-y", "https://github.com/sachajw/2ndbrain-zotero-mcp-server/releases/download/v1.1.5/sachajw-mcp-server-zotero-dev-1.1.5.tgz"],
+      "env": { "ZOTERO_RDP_PORT": "6100" }
     }
   }
 }
 ```
 
-### Claude Code
-
-```bash
-claude mcp add zotero-dev -- npx -y @sachajw/mcp-server-zotero-dev
-```
-
-### Cursor / Windsurf / Other MCP clients
-
-Configure the MCP server with:
-- **Command**: `npx`
-- **Arguments**: `-y @sachajw/mcp-server-zotero-dev`
-
-Or install globally:
-
-```bash
-npm install -g @sachajw/mcp-server-zotero-dev
-```
+Or install it globally with `npm install -g https://github.com/sachajw/2ndbrain-zotero-mcp-server/releases/download/v1.1.5/sachajw-mcp-server-zotero-dev-1.1.5.tgz`.
 
 ## Tools (25)
 

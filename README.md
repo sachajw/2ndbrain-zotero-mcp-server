@@ -41,67 +41,22 @@ A **Model Context Protocol (MCP) server** that enables AI assistants like Claude
 
 ### 1. Install MCP Server
 
-This package isn't published to npm. Build it from source and point your client at the build:
+The server isn't on npm. Each [release](https://github.com/sachajw/2ndbrain-zotero-mcp-server/releases) attaches an `npm pack` tarball, and `npx` runs it straight from the release URL.
+
+**Claude Code**
 
 ```bash
-git clone https://github.com/sachajw/2ndbrain-zotero-mcp-server.git
-cd 2ndbrain-zotero-mcp-server
-npm ci && npm run build
+claude mcp add zotero-dev -e ZOTERO_RDP_PORT=6100 -- npx -y https://github.com/sachajw/2ndbrain-zotero-mcp-server/releases/download/v1.1.5/sachajw-mcp-server-zotero-dev-1.1.5.tgz
 ```
 
-Then add the **Manual Configuration** below, with the real path to `packages/mcp-server/dist/index.js`. The `install-mcp` commands that follow fetch the package from npm, so they only work once it is published.
-
-Use [install-mcp](https://www.npmjs.com/package/install-mcp) to add the server to your AI assistant:
-
-```bash
-npx -y install-mcp @sachajw/mcp-server-zotero-dev --client claude-code
-```
-
-Supported clients: `claude-code`, `cursor`, `windsurf`, `vscode`, `cline`, `roo-cline`, `claude`, `zed`, `goose`, `warp`, `codex`
-
-<details>
-<summary><strong>Claude Code</strong></summary>
-
-```bash
-npx -y install-mcp @sachajw/mcp-server-zotero-dev --client claude-code
-```
-</details>
-
-<details>
-<summary><strong>Cursor</strong></summary>
-
-```bash
-npx -y install-mcp @sachajw/mcp-server-zotero-dev --client cursor
-```
-</details>
-
-<details>
-<summary><strong>VS Code / Copilot</strong></summary>
-
-```bash
-npx -y install-mcp @sachajw/mcp-server-zotero-dev --client vscode
-```
-</details>
-
-<details>
-<summary><strong>Windsurf</strong></summary>
-
-```bash
-npx -y install-mcp @sachajw/mcp-server-zotero-dev --client windsurf
-```
-</details>
-
-<details>
-<summary><strong>Manual Configuration</strong></summary>
-
-Add to your MCP client config:
+**Any other MCP client** (Claude Desktop, Cursor, Windsurf, VS Code)
 
 ```json
 {
   "mcpServers": {
     "zotero-dev": {
-      "command": "node",
-      "args": ["/path/to/2ndbrain-zotero-mcp-server/packages/mcp-server/dist/index.js"],
+      "command": "npx",
+      "args": ["-y", "https://github.com/sachajw/2ndbrain-zotero-mcp-server/releases/download/v1.1.5/sachajw-mcp-server-zotero-dev-1.1.5.tgz"],
       "env": {
         "ZOTERO_RDP_PORT": "6100"
       }
@@ -109,19 +64,18 @@ Add to your MCP client config:
   }
 }
 ```
-</details>
 
-> **Version & updates**: pin an exact version as shown above. A bare `npx <pkg>` (no version) keeps running whatever `npx` cached and won't pick up new releases, so always include a version and `-y` (without `-y`, `npx` hangs waiting for an install prompt). Bump the pinned version to upgrade, or use `@latest` to always fetch the newest at launch (auto-updates, but a bad release would run automatically and it adds a registry check on every start). Note that `install-mcp` may write a config without `-y` or a version, so the manual configuration above is the most robust path.
+> **Version & updates**: the URL pins an exact release. To upgrade, change both version numbers in it to the new [release](https://github.com/sachajw/2ndbrain-zotero-mcp-server/releases). Always keep `-y`, because without it `npx` waits at an install prompt. To run from a clone instead, run `npm ci && npm run build` and use `"command": "node"` with `"args": ["<clone>/packages/mcp-server/dist/index.js"]`.
 
 **Restart your AI assistant** after adding the configuration.
 
 ### 2. Install MCP Bridge Plugin in Zotero
 
-Build it with `npm run build:plugin`, which writes `packages/zotero-plugin-mcp-rdp/build/zotero-mcp-bridge.xpi`, then install it:
+Download [zotero-mcp-bridge-1.0.7.xpi](https://github.com/sachajw/2ndbrain-zotero-mcp-server/releases/download/plugin-v1.0.7/zotero-mcp-bridge-1.0.7.xpi) from the [plugin release](https://github.com/sachajw/2ndbrain-zotero-mcp-server/releases/tag/plugin-v1.0.7) (or build it with `npm run build:plugin`), then install it:
 
 1. In Zotero: **Tools → Plugins**
 2. Click ⚙️ → **Install Plugin From File**
-3. Select the built `.xpi` file
+3. Select the `.xpi` file
 4. **Restart Zotero**
 
 > This lightweight plugin enables the Remote Debugging Protocol when Zotero starts. It only needs to be installed once and works on all Zotero 7+ builds (release, beta, and dev).
@@ -310,8 +264,8 @@ The port lives on **both sides of the bridge**, and both have to agree on it.
 {
   "mcpServers": {
     "zotero-dev": {
-      "command": "node",
-      "args": ["/path/to/2ndbrain-zotero-mcp-server/packages/mcp-server/dist/index.js"],
+      "command": "npx",
+      "args": ["-y", "https://github.com/sachajw/2ndbrain-zotero-mcp-server/releases/download/v1.1.5/sachajw-mcp-server-zotero-dev-1.1.5.tgz"],
       "env": {
         "ZOTERO_RDP_PORT": "6101"
       }
