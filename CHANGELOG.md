@@ -2,7 +2,7 @@
 
 All notable changes to MCP Server Zotero Dev will be documented in this file.
 
-## [Unreleased]
+## [1.1.5] - 2026-11-16
 
 ### Security
 - **Tool arguments could run arbitrary code in Zotero's chrome context.** `zotero_set_pref` escaped string values by replacing `"` only, so a value such as `x\"); evil(); //` closed the string literal and ran `evil()` (the stored value was cut to `x\`). `zotero_get_pref` and `zotero_set_pref` spliced the key in raw, `zotero_read_logs` did the same with `level`, and the "Element not found" errors in `zotero_get_styles` and `zotero_screenshot` did it with the selector. Keys, values and selectors are now embedded with `JSON.stringify`. The MCP SDK does not check arguments against a tool's `inputSchema`, so numeric arguments typed `as number` (`windowId`, `limit`, `depth`, `lines`, `index`, `scale`) could carry code too. They now go through `src/tools/args.ts`, which rejects anything that isn't a finite number in range, and `level`, `target` and `format` must be one of their schema values.
@@ -14,7 +14,14 @@ All notable changes to MCP Server Zotero Dev will be documented in this file.
 - **The unused `awaitPromise` parameter is gone** from the `zotero_execute_js` schema. Promises were always awaited.
 
 ### Added
+- **Installable from a GitHub release.** The package isn't on npm, so each `vX.Y.Z` release attaches the `npm pack` tarball. It includes `LICENSE` (copied in by `prepack`).
 - `tests/execute.test.mts` (unit cases run the prepared code in `node:vm`, plus live cases) and `tests/args.test.mts`. The injection cases run the generated code against stubbed `Services.prefs` and `Zotero.Prefs`. `execute.ts` now loads `index.js` lazily, as `ping.ts` does, so importing it in tests no longer starts an MCP server.
+
+## [Plugin 1.0.7] - 2026-11-16
+
+### Changed
+- **The bridge updates from this repo.** `update_url` points at `sachajw/2ndbrain-zotero-mcp-server`'s `update.json` instead of upstream's, so Zotero no longer offers to replace this build with an upstream release. `author` and `homepage_url` name this fork. No code changes since 1.0.6.
+- **The `.xpi` includes `LICENSE`**, as MIT requires of every copy.
 
 ## [1.1.4] - 2026-09-20
 

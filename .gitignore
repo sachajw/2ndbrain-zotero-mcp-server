@@ -47,3 +47,5 @@ CLAUDE.md
 # MCP Registry publisher credentials and binary
 packages/mcp-server/.mcpregistry_*
 packages/mcp-server/mcp-publisher
+# copied from the repo root by prepack, removed by postpack
+packages/mcp-server/LICENSE

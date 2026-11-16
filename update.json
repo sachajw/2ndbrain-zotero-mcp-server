@@ -3,8 +3,8 @@
     "mcp-rdp@zotero.org": {
       "updates": [
         {
-          "version": "1.0.6",
-          "update_link": "https://github.com/sachajw/2ndbrain-zotero-mcp-server/releases/download/plugin-v1.0.6/zotero-mcp-bridge-1.0.6.xpi",
+          "version": "1.0.7",
+          "update_link": "https://github.com/sachajw/2ndbrain-zotero-mcp-server/releases/download/plugin-v1.0.7/zotero-mcp-bridge-1.0.7.xpi",
           "applications": {
             "zotero": {
               "strict_min_version": "6.999",

@@ -41,6 +41,9 @@ const manifest = JSON.parse(readFileSync(join(addonDir, "manifest.json"), "utf-8
 manifest.version = pkg.version;
 zip.addFile("manifest.json", Buffer.from(JSON.stringify(manifest, null, 2)));
 
+// Add the repo's LICENSE: MIT requires the copyright notice in every copy
+zip.addLocalFile(join(rootDir, "..", "..", "LICENSE"));
+
 // Add locale files
 function addDirToZip(zip, dirPath, zipPath) {
   const files = readdirSync(dirPath);
