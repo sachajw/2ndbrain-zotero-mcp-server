@@ -14,8 +14,8 @@ Verify the bridge answers before you start debugging anything else. The `zotero_
 ## Setup
 
 ```bash
-git clone https://github.com/introfini/mcp-server-zotero-dev.git
-cd mcp-server-zotero-dev
+git clone https://github.com/sachajw/2ndbrain-zotero-mcp-server.git
+cd 2ndbrain-zotero-mcp-server
 npm install
 npm run build
 ```
@@ -23,9 +23,9 @@ npm run build
 This is an npm workspaces monorepo. Use the package names, not the folder names, when targeting a single package:
 
 ```bash
-npm run build -w @introfini/mcp-server-zotero-dev
+npm run build -w @sachajw/mcp-server-zotero-dev
 npm run build -w zotero-plugin-mcp-rdp
-npm run dev   -w @introfini/mcp-server-zotero-dev   # tsc --watch
+npm run dev   -w @sachajw/mcp-server-zotero-dev   # tsc --watch
 ```
 
 ## Before you open a pull request
@@ -127,7 +127,7 @@ Include the versions. A table like this makes a report actionable immediately:
 
 | | |
 |---|---|
-| `@introfini/mcp-server-zotero-dev` | 1.1.3 |
+| `@sachajw/mcp-server-zotero-dev` | 1.1.3 |
 | Zotero | 9.0.6 |
 | MCP Bridge for Zotero plugin | 1.0.5 |
 | OS / Node | macOS 15 / Node 22 |

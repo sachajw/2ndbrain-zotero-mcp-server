@@ -15,7 +15,7 @@
     "rdp",
     "devtools"
   ],
-  "author": "",
+  "author": "Sacha Wharton",
   "license": "MIT",
   "devDependencies": {
     "adm-zip": "^0.5.10"

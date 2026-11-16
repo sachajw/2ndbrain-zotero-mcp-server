@@ -9,9 +9,9 @@
   "scripts": {
     "build": "npm run build -ws",
     "build:plugin": "npm run build -w zotero-plugin-mcp-rdp",
-    "build:server": "npm run build -w @introfini/mcp-server-zotero-dev",
-    "dev": "npm run dev -w @introfini/mcp-server-zotero-dev",
-    "test": "npm run test -w @introfini/mcp-server-zotero-dev",
+    "build:server": "npm run build -w @sachajw/mcp-server-zotero-dev",
+    "dev": "npm run dev -w @sachajw/mcp-server-zotero-dev",
+    "test": "npm run test -w @sachajw/mcp-server-zotero-dev",
     "lint": "npm run lint -ws --if-present",
     "typecheck": "npm run typecheck -ws --if-present",
     "clean": "npm run clean -ws --if-present"
@@ -19,10 +19,10 @@
   "engines": {
     "node": ">=20"
   },
-  "author": "José Fernandes <introfini@gmail.com>",
+  "author": "Sacha Wharton <32266273+sachajw@users.noreply.github.com>",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/introfini/mcp-server-zotero-dev"
+    "url": "https://github.com/sachajw/2ndbrain-zotero-mcp-server"
   }
 }

@@ -2,7 +2,7 @@
 
 An [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that enables AI assistants to build, test, and debug **Zotero 7+ plugins**. It provides 25 tools for UI inspection, JavaScript execution, build integration, logging, database access, and plugin management.
 
-> **How it works**: Zotero 7+ is built on Firefox ESR, so this server communicates with Zotero through Firefox's built-in Remote Debugging Protocol (RDP). A small companion plugin ([MCP Bridge for Zotero](https://github.com/introfini/mcp-server-zotero-dev/releases)) starts the DevTools server inside Zotero, and this MCP server connects to it.
+> **How it works**: Zotero 7+ is built on Firefox ESR, so this server communicates with Zotero through Firefox's built-in Remote Debugging Protocol (RDP). A small companion plugin (MCP Bridge for Zotero, in `packages/zotero-plugin-mcp-rdp`) starts the DevTools server inside Zotero, and this MCP server connects to it.
 
 ```
 AI Assistant (Claude, Cursor, Windsurf, etc.)
@@ -18,18 +18,20 @@ AI Assistant (Claude, Cursor, Windsurf, etc.)
 
 - **Node.js** >= 20
 - **Zotero 7+** (release, beta, or dev build)
-- **MCP Bridge for Zotero** plugin installed in Zotero — [download the latest XPI](https://github.com/introfini/mcp-server-zotero-dev/releases)
+- **MCP Bridge for Zotero** plugin installed in Zotero — build it with `npm run build:plugin` from the repo root
 
 ### Installing the MCP Bridge plugin
 
-1. Download `zotero-mcp-bridge-*.xpi` from [GitHub Releases](https://github.com/introfini/mcp-server-zotero-dev/releases)
+1. Run `npm run build:plugin` from the repo root; it writes `packages/zotero-plugin-mcp-rdp/build/zotero-mcp-bridge.xpi`
 2. In Zotero: **Tools > Add-ons > gear icon > Install Add-on From File...**
-3. Select the downloaded `.xpi` file
+3. Select the built `.xpi` file
 4. Restart Zotero
 
 The plugin automatically starts a DevTools server on port 6100 when Zotero launches.
 
 ## Setup
+
+This package isn't published to npm yet, so the `npx` and `npm install -g` commands below won't resolve. Until it is, run `npm ci && npm run build` from the repo root and use `node /path/to/packages/mcp-server/dist/index.js` as the command.
 
 ### Claude Desktop
 
@@ -40,7 +42,7 @@ Add to your `claude_desktop_config.json`:
   "mcpServers": {
     "zotero-dev": {
       "command": "npx",
-      "args": ["-y", "@introfini/mcp-server-zotero-dev"]
+      "args": ["-y", "@sachajw/mcp-server-zotero-dev"]
     }
   }
 }
@@ -49,19 +51,19 @@ Add to your `claude_desktop_config.json`:
 ### Claude Code
 
 ```bash
-claude mcp add zotero-dev -- npx -y @introfini/mcp-server-zotero-dev
+claude mcp add zotero-dev -- npx -y @sachajw/mcp-server-zotero-dev
 ```
 
 ### Cursor / Windsurf / Other MCP clients
 
 Configure the MCP server with:
 - **Command**: `npx`
-- **Arguments**: `-y @introfini/mcp-server-zotero-dev`
+- **Arguments**: `-y @sachajw/mcp-server-zotero-dev`
 
 Or install globally:
 
 ```bash
-npm install -g @introfini/mcp-server-zotero-dev
+npm install -g @sachajw/mcp-server-zotero-dev
 ```
 
 ## Tools (25)

@@ -41,10 +41,20 @@ A **Model Context Protocol (MCP) server** that enables AI assistants like Claude
 
 ### 1. Install MCP Server
 
+This package isn't published to npm. Build it from source and point your client at the build:
+
+```bash
+git clone https://github.com/sachajw/2ndbrain-zotero-mcp-server.git
+cd 2ndbrain-zotero-mcp-server
+npm ci && npm run build
+```
+
+Then add the **Manual Configuration** below, with the real path to `packages/mcp-server/dist/index.js`. The `install-mcp` commands that follow fetch the package from npm, so they only work once it is published.
+
 Use [install-mcp](https://www.npmjs.com/package/install-mcp) to add the server to your AI assistant:
 
 ```bash
-npx -y install-mcp @introfini/mcp-server-zotero-dev --client claude-code
+npx -y install-mcp @sachajw/mcp-server-zotero-dev --client claude-code
 ```
 
 Supported clients: `claude-code`, `cursor`, `windsurf`, `vscode`, `cline`, `roo-cline`, `claude`, `zed`, `goose`, `warp`, `codex`
@@ -53,7 +63,7 @@ Supported clients: `claude-code`, `cursor`, `windsurf`, `vscode`, `cline`, `roo-
 <summary><strong>Claude Code</strong></summary>
 
 ```bash
-npx -y install-mcp @introfini/mcp-server-zotero-dev --client claude-code
+npx -y install-mcp @sachajw/mcp-server-zotero-dev --client claude-code
 ```
 </details>
 
@@ -61,7 +71,7 @@ npx -y install-mcp @introfini/mcp-server-zotero-dev --client claude-code
 <summary><strong>Cursor</strong></summary>
 
 ```bash
-npx -y install-mcp @introfini/mcp-server-zotero-dev --client cursor
+npx -y install-mcp @sachajw/mcp-server-zotero-dev --client cursor
 ```
 </details>
 
@@ -69,7 +79,7 @@ npx -y install-mcp @introfini/mcp-server-zotero-dev --client cursor
 <summary><strong>VS Code / Copilot</strong></summary>
 
 ```bash
-npx -y install-mcp @introfini/mcp-server-zotero-dev --client vscode
+npx -y install-mcp @sachajw/mcp-server-zotero-dev --client vscode
 ```
 </details>
 
@@ -77,7 +87,7 @@ npx -y install-mcp @introfini/mcp-server-zotero-dev --client vscode
 <summary><strong>Windsurf</strong></summary>
 
 ```bash
-npx -y install-mcp @introfini/mcp-server-zotero-dev --client windsurf
+npx -y install-mcp @sachajw/mcp-server-zotero-dev --client windsurf
 ```
 </details>
 
@@ -90,8 +100,8 @@ Add to your MCP client config:
 {
   "mcpServers": {
     "zotero-dev": {
-      "command": "npx",
-      "args": ["-y", "@introfini/mcp-server-zotero-dev@1.1.1"],
+      "command": "node",
+      "args": ["/path/to/2ndbrain-zotero-mcp-server/packages/mcp-server/dist/index.js"],
       "env": {
         "ZOTERO_RDP_PORT": "6100"
       }
@@ -107,11 +117,11 @@ Add to your MCP client config:
 
 ### 2. Install MCP Bridge Plugin in Zotero
 
-Download [zotero-mcp-bridge.xpi](https://github.com/introfini/mcp-server-zotero-dev/releases/latest) and install:
+Build it with `npm run build:plugin`, which writes `packages/zotero-plugin-mcp-rdp/build/zotero-mcp-bridge.xpi`, then install it:
 
 1. In Zotero: **Tools → Plugins**
 2. Click ⚙️ → **Install Plugin From File**
-3. Select the downloaded `.xpi` file
+3. Select the built `.xpi` file
 4. **Restart Zotero**
 
 > This lightweight plugin enables the Remote Debugging Protocol when Zotero starts. It only needs to be installed once and works on all Zotero 7+ builds (release, beta, and dev).
@@ -300,8 +310,8 @@ The port lives on **both sides of the bridge**, and both have to agree on it.
 {
   "mcpServers": {
     "zotero-dev": {
-      "command": "npx",
-      "args": ["-y", "@introfini/mcp-server-zotero-dev@1.1.2"],
+      "command": "node",
+      "args": ["/path/to/2ndbrain-zotero-mcp-server/packages/mcp-server/dist/index.js"],
       "env": {
         "ZOTERO_RDP_PORT": "6101"
       }
@@ -383,8 +393,8 @@ await zotero_screenshot({ target: 'element', selector: 'menupopup[state="open"]'
 
 ```bash
 # Clone and install
-git clone https://github.com/introfini/mcp-server-zotero-dev.git
-cd mcp-server-zotero-dev
+git clone https://github.com/sachajw/2ndbrain-zotero-mcp-server.git
+cd 2ndbrain-zotero-mcp-server
 npm install
 
 # Build everything
@@ -458,7 +468,7 @@ The short version:
 
 ## 📄 License
 
-MIT © [introfini](https://github.com/introfini)
+MIT © [Sacha Wharton](https://github.com/sachajw). Forked from [introfini/mcp-server-zotero-dev](https://github.com/introfini/mcp-server-zotero-dev) by José Fernandes; see [LICENSE](LICENSE).
 
 ---
 

@@ -5,7 +5,7 @@
 name = "cz_customize"
 tag_format = "$version"
 version_scheme = "semver"
-version = "1.1.4"  # @introfini/mcp-server-zotero-dev (packages/mcp-server)
+version = "1.1.4"  # @sachajw/mcp-server-zotero-dev (packages/mcp-server)
 version_files = ["packages/mcp-server/package.json:^  \"version\""]
 update_changelog_on_bump = false  # CHANGELOG.md is hand-written upstream; with true, bump also fails until a version tag exists
 major_version_zero = true
