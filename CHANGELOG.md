@@ -10,6 +10,7 @@ All notable changes to MCP Server Zotero Dev will be documented in this file.
 ### Fixed
 - **`zotero_execute_js` reported a rejected promise as `Result: undefined`.** Firefox answers a rejected evaluation with `topLevelAwaitRejected: true` and no exception or reason. The tool now reports it as an error. For wrapped code it also shows the reason and stack, which the wrapper stores in a one-time global that is deleted after it's read.
 - **Top-level `await` failed with "await is only valid in async functions"**, both bare (`await p`) and with the `return` inside a block (`try { return await p } catch {}`). `mapped: { await: true }` only works when the client has already rewritten the code, and the brace-counting heuristic missed returns inside a block. Code is now parsed with acorn (`src/tools/js-prepare.ts`). Code with top-level `await` or `return` runs in an async function, and its last expression becomes the result, as in the console. Other code is sent unchanged, so top-level `var`s still persist between calls. A wrapped retry happens only after a compile-time `return`/`await` error, when nothing has run.
+- **`zotero_plugin_install` built a wrong `file://` URL for paths with a space, `#` or `%`**, because it joined strings instead of percent-encoding. It now uses `pathToFileURL`, and rejects a non-string `path`.
 - **The unused `awaitPromise` parameter is gone** from the `zotero_execute_js` schema. Promises were always awaited.
 
 ### Added

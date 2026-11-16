@@ -7,6 +7,8 @@
 import type { Tool, TextContent } from "@modelcontextprotocol/sdk/types.js";
 import { getRdpClient } from "../index.js";
 import { existsSync } from "node:fs";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 // Tool definitions
 export const pluginReloadTool: Tool = {
@@ -253,9 +255,9 @@ export async function handlePluginList(): Promise<TextContent[]> {
 export async function handlePluginInstall(
   args: Record<string, unknown>
 ): Promise<TextContent[]> {
-  const xpiPath = args.path as string;
+  const xpiPath = args.path;
 
-  if (!xpiPath) {
+  if (!xpiPath || typeof xpiPath !== "string") {
     throw new Error("Missing required parameter: path");
   }
 
@@ -269,9 +271,10 @@ export async function handlePluginInstall(
 
   const client = await getRdpClient();
 
-  // We need to pass the file path to Zotero
-  // Zotero can install from file:// URLs
-  const fileUrl = `file://${xpiPath.replace(/\\/g, "/")}`;
+  // Zotero installs from a file:// URL. pathToFileURL percent-encodes spaces,
+  // "#" and "%" (string concatenation produced a different or broken URL)
+  // and handles Windows drive paths.
+  const fileUrl = pathToFileURL(resolve(xpiPath)).href;
 
   // Return as JSON string to avoid RDP preview limitations with nested objects
   const code = `
