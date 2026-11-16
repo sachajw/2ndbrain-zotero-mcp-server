@@ -5,77 +5,63 @@
  */
 
 import type { Tool, TextContent } from "@modelcontextprotocol/sdk/types.js";
-import { getRdpClient } from "../index.js";
+import { randomUUID } from "node:crypto";
+import type { RDPClient, GripValue } from "../rdp/index.js";
+import { prepareCode, rejectionReadCode, wrapBody } from "./js-prepare.js";
+import { jsString, numberArg } from "./args.js";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// IIFE Wrapping Helpers
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Detects if code contains top-level return statements that require IIFE wrapping.
- * Uses a simplified approach: track brace depth and look for 'return' at depth 0.
- *
- * Note: This is a heuristic. The fallback retry mechanism in handleExecuteJs
- * catches cases where detection fails.
- */
-function needsIIFEWrapper(code: string): boolean {
-  // Quick check - if no 'return' keyword, definitely doesn't need wrapping
-  if (!/\breturn\b/.test(code)) {
-    return false;
-  }
-
-  // Remove string literals to avoid false positives (handles escaped quotes)
-  let cleaned = code;
-
-  // Remove template literals (handle nested ${})
-  cleaned = cleaned.replace(/`(?:[^`\\]|\\.)*`/g, "``");
-
-  // Remove double-quoted strings
-  cleaned = cleaned.replace(/"(?:[^"\\]|\\.)*"/g, '""');
-
-  // Remove single-quoted strings
-  cleaned = cleaned.replace(/'(?:[^'\\]|\\.)*'/g, "''");
-
-  // Remove comments
-  cleaned = cleaned.replace(/\/\/[^\n]*/g, ""); // single-line
-  cleaned = cleaned.replace(/\/\*[\s\S]*?\*\//g, ""); // multi-line
-
-  // Track brace depth to find top-level returns
-  // We process character-by-character, checking for 'return' when braceDepth is 0
-  let braceDepth = 0;
-
-  // Use regex to find all potential return statements with word boundaries
-  const returnRegex = /\breturn\b/g;
-  let match;
-
-  while ((match = returnRegex.exec(cleaned)) !== null) {
-    const pos = match.index;
-
-    // Calculate brace depth up to this position
-    braceDepth = 0;
-    for (let i = 0; i < pos; i++) {
-      if (cleaned[i] === "{") braceDepth++;
-      else if (cleaned[i] === "}") braceDepth = Math.max(0, braceDepth - 1);
-    }
-
-    // If brace depth is 0, this is a top-level return
-    if (braceDepth === 0) {
-      return true;
-    }
-  }
-
-  return false;
+/** index.js runs main() on import, so load it lazily (as ping.ts does) to keep this module importable in tests. */
+async function getRdpClient(): Promise<RDPClient> {
+  const index = await import("../index.js");
+  return index.getRdpClient();
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Code preparation (see js-prepare.ts)
+// ─────────────────────────────────────────────────────────────────────────────
+
 /**
- * Wraps code in an IIFE. Uses async IIFE if code contains 'await'.
+ * SpiderMonkey compile errors for top-level `return`/`await`. They are thrown
+ * while parsing, before any of the code runs, so retrying with a wrapper can't
+ * repeat side effects.
  */
-function wrapInIIFE(code: string): string {
-  const hasAwait = /\bawait\s/.test(code);
-  if (hasAwait) {
-    return `(async () => {\n${code}\n})()`;
+const TOP_LEVEL_COMPILE_ERRORS = new Set([
+  "JSMSG_BAD_RETURN_OR_YIELD",
+  "JSMSG_AWAIT_OUTSIDE_ASYNC_OR_MODULE",
+]);
+
+/** The client surface zotero_execute_js needs (a fake one in tests). */
+export type ExecuteJsClient = Pick<RDPClient, "evaluateJS" | "gripToValueAsync">;
+
+function newRejectionKey(): string {
+  return `__zoteroMcpRejection_${randomUUID().replace(/-/g, "")}`;
+}
+
+/** Format a rejection stored by the wrapper, or explain why there is none. */
+async function describeRejection(
+  client: ExecuteJsClient,
+  rejectionKey: string | null
+): Promise<string> {
+  if (rejectionKey) {
+    const read = await client.evaluateJS(rejectionReadCode(rejectionKey));
+    if (!read.exception && !read.exceptionMessage) {
+      const raw = await client.gripToValueAsync(read.result as GripValue);
+      if (typeof raw === "string") {
+        const r = JSON.parse(raw) as {
+          name: string | null;
+          message: string;
+          stack: string | null;
+        };
+        const head = r.name ? `${r.name}: ${r.message}` : r.message;
+        return r.stack ? `${head}\n\nStack trace:\n${r.stack}` : head;
+      }
+    }
   }
-  return `(() => {\n${code}\n})()`;
+  return (
+    "The promise the code evaluated to was rejected. Zotero's debugger " +
+    "reports the rejection without its reason for unwrapped code; add " +
+    "`return` or `await` so the tool can capture the error."
+  );
 }
 
 /**
@@ -108,7 +94,7 @@ export const executeJsTool: Tool = {
     "Has full access to Zotero APIs (Zotero.*, ZoteroPane, etc.). " +
     "Use for testing code snippets, inspecting state, or performing actions. " +
     "Prefer a dedicated tool when one fits the question (zotero_db_query for library data, zotero_read_logs/zotero_read_errors for output, zotero_inspect_object for API discovery); reach for raw JS only when none does. " +
-    "Code with top-level 'return' statements is auto-wrapped in an IIFE. " +
+    "Top-level 'await' and 'return' work: such code runs in an async function, and without a 'return' its last expression is the result. " +
     "Tip: For complex objects, use JSON.stringify(obj) to get full data. " +
     "IMPORTANT: Before calling unknown APIs, use zotero_inspect_object to discover available methods - don't guess API names.",
   inputSchema: {
@@ -117,13 +103,8 @@ export const executeJsTool: Tool = {
       code: {
         type: "string",
         description:
-          "JavaScript code to execute. Can be async (automatically awaited). " +
-          "You can use 'return' at top level - code will be auto-wrapped in IIFE.",
-      },
-      awaitPromise: {
-        type: "boolean",
-        description: "Whether to await the result if it's a Promise (default: true)",
-        default: true,
+          "JavaScript code to execute. Promises are awaited, and a rejection is reported as an error. " +
+          "Top-level 'await' and 'return' are allowed.",
       },
     },
     required: ["code"],
@@ -171,30 +152,39 @@ export const setPrefTool: Tool = {
 export async function handleExecuteJs(
   args: Record<string, unknown>
 ): Promise<TextContent[]> {
-  let code = args.code as string;
+  return executeJsWithClient(await getRdpClient(), args);
+}
+
+export async function executeJsWithClient(
+  client: ExecuteJsClient,
+  args: Record<string, unknown>
+): Promise<TextContent[]> {
+  const code = args.code;
 
   if (!code || typeof code !== "string") {
     throw new Error("Missing required parameter: code");
   }
 
-  const client = await getRdpClient();
-  const originalCode = code;
+  const prepared = prepareCode(code, newRejectionKey());
+  let rejectionKey = prepared.rejectionKey;
+  let response = await client.evaluateJS(prepared.code);
 
-  // Auto-wrap in IIFE if code has top-level return statements
-  if (needsIIFEWrapper(code)) {
-    code = wrapInIIFE(code);
+  // acorn rejected the code but Zotero may still accept it (or report a better
+  // error). If Zotero failed only on top-level return/await, wrap and retry.
+  if (
+    !prepared.parsed &&
+    response.errorMessageName &&
+    TOP_LEVEL_COMPILE_ERRORS.has(response.errorMessageName)
+  ) {
+    rejectionKey = newRejectionKey();
+    response = await client.evaluateJS(wrapBody(code, rejectionKey));
   }
 
-  let response = await client.evaluateJS(code);
-
-  // Fallback: if detection failed and we get "return not in function" error,
-  // wrap the original code and retry
-  if (
-    response.exceptionMessage?.includes("return not in function") &&
-    code === originalCode // Only retry if we didn't already wrap
-  ) {
-    code = wrapInIIFE(originalCode);
-    response = await client.evaluateJS(code);
+  if (response.topLevelAwaitRejected) {
+    const detail = await describeRejection(client, rejectionKey);
+    return [
+      { type: "text", text: `Error executing JavaScript (promise rejected):\n\n${detail}` },
+    ];
   }
 
   if (response.exception || response.exceptionMessage) {
@@ -268,6 +258,48 @@ export async function handleExecuteJs(
   ];
 }
 
+/** JS that reads preference `key`. Exported for tests. */
+export function getPrefCode(key: string): string {
+  if (key.startsWith("extensions.zotero.")) {
+    // Zotero.Prefs takes the key without the "extensions.zotero." branch
+    return `Zotero.Prefs.get(${jsString(key.slice("extensions.zotero.".length))})`;
+  }
+  return `
+      (() => {
+        const prefs = Services.prefs;
+        const key = ${jsString(key)};
+        switch (prefs.getPrefType(key)) {
+          case prefs.PREF_STRING:
+            return prefs.getStringPref(key);
+          case prefs.PREF_INT:
+            return prefs.getIntPref(key);
+          case prefs.PREF_BOOL:
+            return prefs.getBoolPref(key);
+          default:
+            return null;
+        }
+      })()
+    `;
+}
+
+/**
+ * JS that sets preference `key` to `value`. JSON.stringify gives a valid JS
+ * literal with quotes, backslashes and newlines escaped (the old quote-only
+ * escape let a value containing `\\"` break out of the string). Exported for tests.
+ */
+export function setPrefCode(key: string, value: unknown): string {
+  if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") {
+    throw new Error(`Unsupported preference value type: ${value === null ? "null" : typeof value}`);
+  }
+  const literal = JSON.stringify(value);
+  if (key.startsWith("extensions.zotero.")) {
+    return `Zotero.Prefs.set(${jsString(key.slice("extensions.zotero.".length))}, ${literal})`;
+  }
+  const setter =
+    typeof value === "string" ? "setStringPref" : typeof value === "number" ? "setIntPref" : "setBoolPref";
+  return `Services.prefs.${setter}(${jsString(key)}, ${literal})`;
+}
+
 export async function handleGetPref(
   args: Record<string, unknown>
 ): Promise<TextContent[]> {
@@ -277,33 +309,8 @@ export async function handleGetPref(
     throw new Error("Missing required parameter: key");
   }
 
+  const code = getPrefCode(key);
   const client = await getRdpClient();
-
-  // Determine which API to use based on the preference path
-  let code: string;
-  if (key.startsWith("extensions.zotero.")) {
-    // Use Zotero.Prefs for Zotero-specific prefs
-    const zoteroKey = key.replace("extensions.zotero.", "");
-    code = `Zotero.Prefs.get("${zoteroKey}")`;
-  } else {
-    // Use Services.prefs for general prefs
-    code = `
-      (() => {
-        const prefs = Services.prefs;
-        const type = prefs.getPrefType("${key}");
-        switch (type) {
-          case prefs.PREF_STRING:
-            return prefs.getStringPref("${key}");
-          case prefs.PREF_INT:
-            return prefs.getIntPref("${key}");
-          case prefs.PREF_BOOL:
-            return prefs.getBoolPref("${key}");
-          default:
-            return null;
-        }
-      })()
-    `;
-  }
 
   const response = await client.evaluateJS(code);
 
@@ -336,31 +343,8 @@ export async function handleSetPref(
     throw new Error("Missing required parameter: value");
   }
 
+  const code = setPrefCode(key, value);
   const client = await getRdpClient();
-
-  // Escape value for JavaScript
-  const valueStr =
-    typeof value === "string"
-      ? `"${value.replace(/"/g, '\\"')}"`
-      : JSON.stringify(value);
-
-  // Determine which API to use
-  let code: string;
-  if (key.startsWith("extensions.zotero.")) {
-    const zoteroKey = key.replace("extensions.zotero.", "");
-    code = `Zotero.Prefs.set("${zoteroKey}", ${valueStr})`;
-  } else {
-    // Use Services.prefs for general prefs
-    if (typeof value === "string") {
-      code = `Services.prefs.setStringPref("${key}", ${valueStr})`;
-    } else if (typeof value === "number") {
-      code = `Services.prefs.setIntPref("${key}", ${valueStr})`;
-    } else if (typeof value === "boolean") {
-      code = `Services.prefs.setBoolPref("${key}", ${valueStr})`;
-    } else {
-      throw new Error(`Unsupported preference value type: ${typeof value}`);
-    }
-  }
 
   const response = await client.evaluateJS(code);
 
@@ -413,7 +397,7 @@ export async function handleSearchPrefs(
 ): Promise<TextContent[]> {
   const branch = (args.branch as string) || "extensions.zotero.";
   const pattern = args.pattern as string | undefined;
-  const limit = (args.limit as number) || 50;
+  const limit = numberArg(args, "limit", 50, { integer: true, min: 1 });
 
   const client = await getRdpClient();
 
@@ -591,7 +575,7 @@ export async function handleInspectObject(
 ): Promise<TextContent[]> {
   const path = args.path as string;
   const filter = (args.filter as string) || "all";
-  const depth = Math.min(Math.max((args.depth as number) || 2, 1), 5);
+  const depth = Math.min(Math.max(numberArg(args, "depth", 2, { integer: true }), 1), 5);
   const pattern = args.pattern as string | undefined;
 
   if (!path || typeof path !== "string") {

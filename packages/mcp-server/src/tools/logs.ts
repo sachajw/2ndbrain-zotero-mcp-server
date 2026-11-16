@@ -6,6 +6,7 @@
 
 import type { Tool, TextContent } from "@modelcontextprotocol/sdk/types.js";
 import { getRdpClient } from "../index.js";
+import { enumArg, numberArg } from "./args.js";
 
 // Tool definitions
 export const readLogsTool: Tool = {
@@ -83,9 +84,9 @@ export const watchLogsTool: Tool = {
 export async function handleReadLogs(
   args: Record<string, unknown>
 ): Promise<TextContent[]> {
-  const lines = (args.lines as number) || 100;
+  const lines = numberArg(args, "lines", 100, { integer: true, min: 1 });
   const filter = args.filter as string | undefined;
-  const level = (args.level as string) || "all";
+  const level = enumArg(args, "level", ["all", "error", "warning", "info"] as const, "all");
 
   const client = await getRdpClient();
 
@@ -258,7 +259,7 @@ export async function handleReadLogs(
 export async function handleReadErrors(
   args: Record<string, unknown>
 ): Promise<TextContent[]> {
-  const lines = (args.lines as number) || 20;
+  const lines = numberArg(args, "lines", 20, { integer: true, min: 1 });
 
   const client = await getRdpClient();
 

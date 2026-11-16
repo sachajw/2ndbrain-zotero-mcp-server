@@ -6,6 +6,7 @@
 
 import type { Tool, TextContent } from "@modelcontextprotocol/sdk/types.js";
 import { getRdpClient } from "../index.js";
+import { jsString, numberArg, optionalNumberArg } from "./args.js";
 
 // Tool definitions
 export const inspectElementTool: Tool = {
@@ -102,8 +103,8 @@ export async function handleInspectElement(
   args: Record<string, unknown>
 ): Promise<TextContent[]> {
   const selector = args.selector as string;
-  const windowId = args.windowId as number | undefined;
-  const limit = (args.limit as number) || 10;
+  const windowId = optionalNumberArg(args, "windowId", { integer: true });
+  const limit = numberArg(args, "limit", 10, { integer: true, min: 1 });
 
   if (!selector) {
     throw new Error("Missing required parameter: selector");
@@ -206,8 +207,8 @@ export async function handleGetDomTree(
   args: Record<string, unknown>
 ): Promise<TextContent[]> {
   const selector = args.selector as string | undefined;
-  const depth = (args.depth as number) || 3;
-  const windowId = args.windowId as number | undefined;
+  const depth = numberArg(args, "depth", 3, { integer: true, min: 1 });
+  const windowId = optionalNumberArg(args, "windowId", { integer: true });
 
   const client = await getRdpClient();
 
@@ -316,7 +317,7 @@ export async function handleGetStyles(
 ): Promise<TextContent[]> {
   const selector = args.selector as string;
   const properties = args.properties as string[] | undefined;
-  const windowId = args.windowId as number | undefined;
+  const windowId = optionalNumberArg(args, "windowId", { integer: true });
 
   if (!selector) {
     throw new Error("Missing required parameter: selector");
@@ -372,7 +373,7 @@ export async function handleGetStyles(
 
       const el = win.document.querySelector(${JSON.stringify(selector)});
       if (!el) {
-        return JSON.stringify({ error: "Element not found: ${selector}" });
+        return JSON.stringify({ error: "Element not found: " + ${jsString(selector)} });
       }
 
       const computed = win.getComputedStyle(el);

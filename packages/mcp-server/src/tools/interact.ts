@@ -25,6 +25,7 @@
 
 import type { Tool, TextContent } from "@modelcontextprotocol/sdk/types.js";
 import { getRdpClient } from "../index.js";
+import { numberArg, optionalNumberArg } from "./args.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared helper: resolve the target window inside the evaluated snippet.
@@ -165,8 +166,8 @@ export async function handleClickElement(
   args: Record<string, unknown>
 ): Promise<TextContent[]> {
   const selector = args.selector as string;
-  const windowId = args.windowId as number | undefined;
-  const index = (args.index as number) ?? 0;
+  const windowId = optionalNumberArg(args, "windowId", { integer: true });
+  const index = numberArg(args, "index", 0, { integer: true, min: 0 });
   const mouseEvents = Boolean(args.mouseEvents);
 
   if (!selector) {
@@ -252,7 +253,7 @@ export async function handleSendKeys(
 ): Promise<TextContent[]> {
   const text = args.text as string;
   const selector = args.selector as string | undefined;
-  const windowId = args.windowId as number | undefined;
+  const windowId = optionalNumberArg(args, "windowId", { integer: true });
   const clear = Boolean(args.clear);
   const pressEnter = Boolean(args.pressEnter);
 

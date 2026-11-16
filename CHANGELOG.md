@@ -2,6 +2,19 @@
 
 All notable changes to MCP Server Zotero Dev will be documented in this file.
 
+## [Unreleased]
+
+### Security
+- **Tool arguments could run arbitrary code in Zotero's chrome context.** `zotero_set_pref` escaped string values by replacing `"` only, so a value such as `x\"); evil(); //` closed the string literal and ran `evil()` (the stored value was cut to `x\`). `zotero_get_pref` and `zotero_set_pref` spliced the key in raw, `zotero_read_logs` did the same with `level`, and the "Element not found" errors in `zotero_get_styles` and `zotero_screenshot` did it with the selector. Keys, values and selectors are now embedded with `JSON.stringify`. The MCP SDK does not check arguments against a tool's `inputSchema`, so numeric arguments typed `as number` (`windowId`, `limit`, `depth`, `lines`, `index`, `scale`) could carry code too. They now go through `src/tools/args.ts`, which rejects anything that isn't a finite number in range, and `level`, `target` and `format` must be one of their schema values.
+
+### Fixed
+- **`zotero_execute_js` reported a rejected promise as `Result: undefined`.** Firefox answers a rejected evaluation with `topLevelAwaitRejected: true` and no exception or reason. The tool now reports it as an error. For wrapped code it also shows the reason and stack, which the wrapper stores in a one-time global that is deleted after it's read.
+- **Top-level `await` failed with "await is only valid in async functions"**, both bare (`await p`) and with the `return` inside a block (`try { return await p } catch {}`). `mapped: { await: true }` only works when the client has already rewritten the code, and the brace-counting heuristic missed returns inside a block. Code is now parsed with acorn (`src/tools/js-prepare.ts`). Code with top-level `await` or `return` runs in an async function, and its last expression becomes the result, as in the console. Other code is sent unchanged, so top-level `var`s still persist between calls. A wrapped retry happens only after a compile-time `return`/`await` error, when nothing has run.
+- **The unused `awaitPromise` parameter is gone** from the `zotero_execute_js` schema. Promises were always awaited.
+
+### Added
+- `tests/execute.test.mts` (unit cases run the prepared code in `node:vm`, plus live cases) and `tests/args.test.mts`. The injection cases run the generated code against stubbed `Services.prefs` and `Zotero.Prefs`. `execute.ts` now loads `index.js` lazily, as `ping.ts` does, so importing it in tests no longer starts an MCP server.
+
 ## [1.1.4] - 2026-09-20
 
 ### Fixed

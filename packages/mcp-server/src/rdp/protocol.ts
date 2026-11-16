@@ -120,6 +120,15 @@ export interface EvaluateJSResponse extends RDPResponse {
   exceptionMessage?: string;
   helperResult?: unknown;
   timestamp?: number;
+  /** True when the evaluation threw (the details are in `exception`). */
+  hasException?: boolean;
+  /** SpiderMonkey error id for an exception, e.g. "JSMSG_BAD_RETURN_OR_YIELD". */
+  errorMessageName?: string;
+  /**
+   * True when the evaluated value was a promise that rejected. Firefox sends
+   * no `exception` or reason with it.
+   */
+  topLevelAwaitRejected?: boolean;
 }
 
 // Grip (serialized JS value)

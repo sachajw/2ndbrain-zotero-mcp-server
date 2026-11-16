@@ -6,6 +6,7 @@
 
 import type { Tool, TextContent, ImageContent } from "@modelcontextprotocol/sdk/types.js";
 import { getRdpClient } from "../index.js";
+import { enumArg, jsString, numberArg, optionalNumberArg } from "./args.js";
 
 export const screenshotTool: Tool = {
   name: "zotero_screenshot",
@@ -51,12 +52,12 @@ export const screenshotTool: Tool = {
 export async function handleScreenshot(
   args: Record<string, unknown>
 ): Promise<(TextContent | ImageContent)[]> {
-  const target = (args.target as string) || "main-window";
-  const windowId = args.windowId as number | undefined;
+  const target = enumArg(args, "target", ["main-window", "window", "element"] as const, "main-window");
+  const windowId = optionalNumberArg(args, "windowId", { integer: true });
   const selector = args.selector as string | undefined;
   const highlightSelector = args.highlightSelector as string | undefined;
-  const format = (args.format as string) || "png";
-  const scale = (args.scale as number) || 1;
+  const format = enumArg(args, "format", ["png", "jpeg"] as const, "png");
+  const scale = numberArg(args, "scale", 1, { min: 0.1 });
 
   if (target === "element" && !selector) {
     throw new Error("selector is required when target='element'");
@@ -171,7 +172,7 @@ function buildScreenshotCode(options: ScreenshotOptions): string {
             ? `
           element = win.document.querySelector(${JSON.stringify(selector)});
           if (!element) {
-            return JSON.stringify({ error: "Element not found: ${selector}" });
+            return JSON.stringify({ error: "Element not found: " + ${jsString(selector ?? "")} });
           }
         `
             : ""

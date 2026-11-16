@@ -6,6 +6,7 @@
 
 import type { Tool, TextContent } from "@modelcontextprotocol/sdk/types.js";
 import { getRdpClient } from "../index.js";
+import { numberArg } from "./args.js";
 
 // Tool definitions
 export const dbQueryTool: Tool = {
@@ -230,7 +231,7 @@ export async function handleDbQuery(
 ): Promise<TextContent[]> {
   const query = args.query as string;
   const params = (args.params as unknown[]) || [];
-  const limit = Math.min((args.limit as number) || 100, 1000);
+  const limit = Math.min(numberArg(args, "limit", 100, { integer: true, min: 1 }), 1000);
 
   if (!query) {
     throw new Error("Missing required parameter: query");
